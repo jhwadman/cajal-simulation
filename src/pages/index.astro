@@ -1,0 +1,37 @@
+---
+/**
+ * / — the simulation, and nothing else.
+ *
+ * The studio's Simulation tab, whole and on its own — the control bench in
+ * both its modes (pick a preset; describe it, which needs the studio's local
+ * relay and marks itself offline here), the treatments and the untreated
+ * comparison, the cell-by-cell run, the brain in its organ, depth and slice
+ * views. The explainer that says how it works lives on its own page,
+ * /how-it-works, linked from the line above the bench.
+ *
+ * The tab is Studio.astro with `standalone`, driven by the same client.ts as
+ * the full studio (github.com/jhwadman/cajal), so nothing here is a second
+ * copy of the bench. This site never sets CAJAL_RELAY: the page makes no
+ * request once loaded, and the whole run is computed in the browser.
+ */
+import Base from '../layouts/Base.astro';
+import Studio from '../components/Studio.astro';
+import { EXPLAINER } from '../lib/copy.ts';
+
+const relay = String(import.meta.env.CAJAL_RELAY ?? '').replace(/\/$/, '');
+if (relay && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(relay)) {
+  throw new Error(`CAJAL_RELAY must be a loopback http origin (got ${relay}): the relay holds keys and must never be reached across a network`);
+}
+---
+
+<Base title="Simulation" description={EXPLAINER.lead}>
+  <!-- The tab fills the window and its panes scroll themselves, so the line
+       above the bench is the one place to say the explainer exists. It opens
+       in a new tab so the run you are watching keeps playing. -->
+  <nav class="standalone-strip" aria-label="about this page">
+    <span class="label">the simulation</span>
+    <a href="/how-it-works" target="_blank" rel="noopener">how it works ↗</a>
+    <a href="https://github.com/jhwadman/cajal-simulation" target="_blank" rel="noopener">source ↗</a>
+  </nav>
+  <Studio relay={relay} standalone />
+</Base>

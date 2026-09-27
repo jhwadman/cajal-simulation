@@ -1,0 +1,765 @@
+---
+/**
+ * The studio: four tabs and a chat drawer.
+ *
+ *   Simulation     the brain, its readout and the controls to put it in a
+ *                  state, with or without a treatment
+ *   Single neuron  the Goldman–Hodgkin–Katz equation and a Hodgkin–Huxley
+ *                  membrane
+ *   EEG benchmark  the closed loop that tests LaBraM: its verdict at the top
+ *                  right, and under it the EEG of every state it judged
+ *   Glossary       the words, what is AI and what is maths, the spec
+ *
+ * The brain and its readout (#stage) are one element that the client moves
+ * into whichever of Simulation or Investigate is showing it; the benchmark
+ * tab draws recordings, not the brain. Cajal lives in a
+ * drawer opened from the tab bar, so it is reachable from every tab. Every
+ * panel carries a badge saying whether it is plain mathematics or AI.
+ *
+ * Every dynamic element has an id the client (src/lib/client.ts, and
+ * src/lib/neuronTab.ts for the neuron tab) fills; nothing here renders data.
+ */
+import { COVER, SIM, BENCH, INVESTIGATE } from '../lib/copy.ts';
+import { PRESETS, PRESET_GROUPS } from '../../service/engine/presets.ts';
+import { TREATMENTS } from '../../service/engine/medications.ts';
+import { NEURON_CONDITIONS, NEURON_DRUGS } from '../../service/engine/neuron.ts';
+
+interface Props {
+  relay: string;
+  /** the shareable page: the Simulation tab alone, the other tabs living at `/` */
+  standalone?: boolean;
+}
+const { relay, standalone = false } = Astro.props;
+
+
+const KNOBS: Array<[string, string]> = [
+  ['excitability', 'Sensitivity of the excitatory population, the analogue of pyramidal-cell gain. Up makes the brain hyper-responsive; pushed far enough it discharges on its own.'],
+  ['inhibition', "Strength of the local inhibitory population, the analogue of GABAergic interneurons. It is the network's brake; dropping it removes containment."],
+  ['coupling', 'Gain along the wiring between regions: how easily activity in one region jumps to its neighbours.'],
+  ['adaptation', 'Activity-dependent fatigue, the analogue of slow potassium currents. It builds while a region fires and forces it to pause: the rise and fall of slow-wave sleep.'],
+  ['arousal', 'Brainstem drive, the analogue of noradrenaline and acetylcholine. High arousal breaks slow waves into fast waking rhythms; near zero, activity collapses.'],
+  ['noise', 'Random background input standing in for subcortical fluctuations.'],
+];
+
+const ION_SLIDERS: Array<[string, string, number, number, number]> = [
+  ['K_in', 'K⁺ inside', 50, 200, 1],
+  ['K_out', 'K⁺ outside', 1, 40, 0.5],
+  ['Na_in', 'Na⁺ inside', 2, 60, 1],
+  ['Na_out', 'Na⁺ outside', 80, 180, 1],
+  ['Cl_in', 'Cl⁻ inside', 2, 80, 1],
+  ['Cl_out', 'Cl⁻ outside', 60, 160, 1],
+];
+
+// Plain definitions, one idea each. The rule here is that a reader meeting a
+// word for the first time should not need a second word explained to get
+// through the sentence. Every number is checked against the engine:
+// twelve presets, fifteen treatments, 68 + 17 = 85 regions, bands from
+// service/engine/analysis.ts, the colour scale from src/lib/colormap.ts.
+const GLOSSARY: Array<[string, string]> = [
+  ['brain state', 'A stable regime the whole network settles into: alert, deep sleep, seizure. In the model it is one setting of the six knobs.'],
+  ['run', 'One simulation or one analysis, kept under a short id: wb- whole-brain, mc- cell by cell, nr- single neuron, eeg- a scalp recording, bench- a benchmark. Any run can be redrawn from History, and Cajal can look one up by id.'],
+  ['preset', 'A saved set of knob values that reproduces a named state. There are twelve.'],
+  ['knob', 'One of six numbers in the regional equations: excitability, inhibition, coupling, adaptation, arousal, noise. 1 is the awake baseline; 0 is off.'],
+  ['treatment', 'A drug or lab compound, written as multipliers on the model’s parameters and applied on top of a condition. It shows which way the compound pushes the network and roughly how far. The multipliers were written by hand from what the drug does at its receptor; this is not a pharmacokinetic model.'],
+  ['dose', 'How hard a treatment pushes, 0–150%. 100% is a typical clinical effect — or, for the lab compounds, a typical experimental one.'],
+  ['region', 'One of 85 nodes: 68 cortical parcels from the Desikan–Killiany atlas, plus 17 deeper ones — the subcortical nuclei, the cerebellum and the brainstem.'],
+  ['connectome', 'The wiring between regions, with a conduction delay on every link. Synthetic: a distance rule plus a handful of long-range pathways added by hand. Not measured tractography.'],
+  ['excitation', 'The firing rate of a region’s excitatory population, 0 quiet to 1 saturated. On the brain it is painted over the tissue grey on the Turbo scale: blue is weak, then green and yellow, red where a region saturates. Resting cortex keeps its anatomy, so colour always means activation.'],
+  ['mean field', 'The average excitation across all 85 regions, moment by moment.'],
+  ['synchrony', 'How much of the regions’ variation is shared: the variance of the mean field over the average variance of the regions. 0 is independent, 1 is lockstep. A shared-variance ratio, not a phase measure.'],
+  ['rhythm and bands', 'Delta 1–4 Hz (deep sleep), theta 4–8 (drowsiness), alpha 8–13 (relaxed wakefulness), beta 13–30 (alertness), gamma 30–80 (fast local processing). Band power is the share of the signal sitting in each.'],
+  ['sweep', 'Running the model many times over a range of ONE parameter, everything else held still, so you see the shape of the response instead of a single point. The Investigate tab is built on sweeps.'],
+  ['sharpness', 'How abrupt a response is: the biggest single step in a sweep divided by the step an even, straight-line response would have taken. 1 is a straight line; above 3 is a tipping point.'],
+  ['monotone', 'A response that only ever moves one way. When a sweep is not monotone, the same change helps and then hurts — usually the interesting part.'],
+  ['whole-brain model', 'A Wilson–Cowan neural-mass model: excitation–inhibition loops in all 85 regions at once, stepped forward in time.'],
+  ['microcircuit', 'A sparse random network of Izhikevich spiking neurons, for looking at a state cell by cell.'],
+  ['membrane potential', 'The voltage across a neuron’s membrane, inside relative to outside. About −70 mV at rest.'],
+  ['Nernst potential', 'The voltage at which one ion’s concentration gradient is exactly balanced by the electrical pull on it, so it stops flowing: E = (RT/zF)·ln([out]/[in]).'],
+  ['permeability', 'How easily an ion crosses the membrane, set by how many of its channels are open. At rest the membrane is most permeable to potassium.'],
+  ['Goldman equation (GHK)', 'Where the resting voltage settles when several ions cross at once, each gradient weighted by its permeability. It explains why rest sits near E_K, and why opening sodium channels swings the voltage toward E_Na.'],
+  ['Hodgkin–Huxley model', 'The equations for a spiking membrane: sodium channels with two gates (m opens fast, h shuts slowly), potassium channels with one (n), and a leak. Their interplay turns a depolarisation into an action potential.'],
+  ['depolarisation block', 'A neuron held so far above its resting voltage that its sodium channels stay inactivated. Maximally excited, and completely unable to fire.'],
+  ['EEG', 'Electroencephalogram: electrical potentials recorded at the scalp, nineteen of them here. The studio reads real EEG files, and can make a synthetic one from a simulation.'],
+  ['forward model', 'The step that turns a simulation into a scalp recording: each of the 19 electrodes gets a distance-weighted sum of the cortical regions under it, plus pink noise and a trace of mains hum. A distance kernel, not a head model — rhythm and amplitude survive it, precise localisation does not.'],
+  ['epoch (window)', 'Four seconds of recording, all 19 channels together, taken as one unit. The benchmark cuts every recording into epochs and scores them one at a time. The two words mean the same thing here.'],
+  ['LaBraM', 'Large Brain Model, a network trained on about 2,500 hours of real human EEG. Give it one epoch and it returns a few hundred numbers describing what that stretch looked like. It names nothing and diagnoses nothing.'],
+  ['latent embedding', 'Those few hundred numbers, read as coordinates: two numbers place a dot on a map, several hundred place a signal in latent space. Recordings that look alike land close together, which is what lets the benchmark ask whether simulated states can be told apart without ever being told what they are.'],
+  ['Cajal (agent)', 'The AI assistant behind the chat, run by the Melchizedek runtime on a language model. It calls the studio’s tools and may report only what they returned.'],
+  ['blind judge', 'A separate instance of the language model. It reads only the automated analysis of a recording, never the state that produced it, and names the state.'],
+  ['confidence', 'Two different numbers, and the benchmark keeps them apart. The judge reports its own, 0–100%, and it is a self-assessment. LaBraM’s is measured instead: hold one epoch out, find which state’s centroid it lands nearest, and score how decisively it belongs there. Nothing reports that second number — it is calculated.'],
+];
+
+const math = 'plain mathematics: equations solved on this machine; no AI involved';
+
+// Each About section is paired with a figure the engine computes when the tab
+// opens, in COVER.sections order. The captions are written here rather than by
+// the scribe because they describe a picture, not the studio.
+const FIGURES: Array<{ kind: string; caption: string; alt: string }> = [
+  {
+    kind: 'populations',
+    alt: 'a spike raster of 180 model neurons above the single population rate they sum to',
+    caption: 'Above, a spiking circuit run cell by cell: every dot is one neuron firing once, orange for excitatory and cyan for inhibitory. Below, the single number the whole-brain model works with instead. Both come from one simulation, integrated when you opened this tab.',
+  },
+  {
+    kind: 'scales',
+    alt: 'three stacked traces: one membrane, one circuit, and the mean activity of 85 regions',
+    caption: 'One membrane spiking, one circuit\'s population rate, and the mean activity of 85 coupled regions. The same question asked at three sizes, each by a different model in this studio.',
+  },
+  {
+    kind: 'states',
+    alt: 'three mean-activity traces: awake, seizing, and treated',
+    caption: 'The awake brain, the same brain with its inhibition lowered until it discharges, and that seizure given a full dose of a benzodiazepine. Three runs, one changed parameter and one drug between them.',
+  },
+  {
+    kind: 'repeat',
+    alt: 'two identical traces drawn on top of one another',
+    caption: 'The awake state integrated twice from the same settings. The dashed line is the second run, drawn over the first: it lands on every sample of it, which is what having a run id is worth.',
+  },
+];
+// the About tab's section list names tabs; this is the only place names become ids
+const TAB_OF: Record<string, string> = {
+  Simulation: 'sim',
+  'EEG benchmark': 'bench',
+  'Single neuron': 'neuron',
+  Investigate: 'inv',
+  Glossary: 'glossary',
+};
+---
+
+<main class="app" id="studio" data-relay={relay} data-standalone={standalone ? "true" : undefined}>
+  <!-- The page opens on the Simulation tab (2026-09-19): the brain is running
+       within two seconds and is the thing the studio is, so a first visit
+       shows the product and keeps the manual one click away. The markup
+       paints that state before any script runs. Roving tabindex: arrow keys
+       move between tabs (client.ts), Tab leaves the strip. -->
+  <nav class="tabs" role="tablist" aria-label="studio sections">
+    <button role="tab" data-tab="about" aria-selected="false" tabindex="-1">About</button>
+    <button role="tab" data-tab="sim" aria-selected="true">Simulation</button>
+    <button role="tab" data-tab="bench" aria-selected="false" tabindex="-1">EEG benchmark</button>
+    <button role="tab" data-tab="neuron" aria-selected="false" tabindex="-1">Single neuron</button>
+    <button role="tab" data-tab="inv" aria-selected="false" tabindex="-1">Investigate</button>
+    <button role="tab" data-tab="glossary" aria-selected="false" tabindex="-1">Glossary</button>
+    <span class="tabs-spacer"></span>
+  </nav>
+
+  <!-- The About tab is DOCUMENTATION, not a dashboard (2026-09-19): one
+       article in a reading measure with a contents rail beside it, numbered
+       technical headings, and the four figures inline at full column width.
+       Nothing here is a card. The prose still comes from src/lib/copy.ts;
+       the section headings are hand-written technical titles and the
+       briefs ask for that shape now. Anchors are `about-*`; client.ts opens
+       this tab for any of them. -->
+  <section class="tabpanel" data-panel="about" hidden>
+    <div class="doc-layout">
+      <nav class="doc-toc" aria-label="contents">
+        <div class="label">contents</div>
+        <ol>
+          <li><a href="#about-overview">Overview</a></li>
+          <li><a href="#about-model">Neural-mass dynamics</a></li>
+          <li><a href="#about-scales">Three scales</a></li>
+          <li><a href="#about-state">State space and treatments</a></li>
+          <li><a href="#about-runs">Runs and determinism</a></li>
+          <li><a href="#about-simulation">Whole-brain simulation</a></li>
+          <li><a href="#about-investigate">Investigations</a></li>
+          <li><a href="#about-neuron">Single neuron</a></li>
+          <li><a href="#about-benchmark">EEG benchmark</a></li>
+          <li><a href="#about-limits">Scope and limits</a></li>
+        </ol>
+      </nav>
+
+      <article class="doc" id="about-doc">
+        <header class="doc-head">
+          <h1>{COVER.title}</h1>
+          <p class="doc-lead">{COVER.lead}</p>
+        </header>
+
+        <section id="about-overview">
+          <h2>Overview</h2>
+          <dl class="doc-callouts">
+            <div><dt><span class="badge math">math</span> deterministic</dt><dd>{COVER.math}</dd></div>
+            <div><dt><span class="badge ai">AI</span> where the models are</dt><dd>{COVER.ai}</dd></div>
+          </dl>
+          <h3>Sections of the studio</h3>
+          <dl class="doc-sections">
+            {COVER.tabs.map((t) => (
+              <div>
+                <dt><button class="linkish" data-goto={TAB_OF[t.name]}>{t.name}</button></dt>
+                <dd>{t.body}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+
+        {COVER.sections.map((sec, i) => (
+          <section id={['about-model', 'about-scales', 'about-state', 'about-runs'][i]}>
+            <h2>{sec.title}</h2>
+            <p>{sec.body}</p>
+            {FIGURES[i] && (
+              <figure class="doc-figure">
+                <canvas class="about-fig" data-figure={FIGURES[i].kind} aria-label={FIGURES[i].alt}></canvas>
+                <figcaption><b>Figure {i + 1}.</b> {FIGURES[i].caption}</figcaption>
+              </figure>
+            )}
+          </section>
+        ))}
+
+        <!-- The working tabs are workspaces, so their documentation lives
+             HERE: what a section computes, what it may claim and how to work
+             it belongs on the page you come to in order to understand the
+             studio, not on top of the controls you came back to use. -->
+        <div id="cover-headers">
+        <section id="about-simulation">
+          <h2>{SIM.title}</h2>
+          <p>{SIM.lead}</p>
+          <h3>Working the bench</h3>
+          <ol class="doc-steps">
+            {SIM.steps.map((st) => (<li><b>{st.name}.</b> {st.body}</li>))}
+          </ol>
+        </section>
+
+        <section id="about-investigate">
+          <h2>{INVESTIGATE.title}</h2>
+          <p>{INVESTIGATE.lead}</p>
+          <p>{INVESTIGATE.sweep}</p>
+        </section>
+
+        <section id="about-neuron">
+          <h2>Single neuron: Nernst, Goldman–Hodgkin–Katz and Hodgkin–Huxley</h2>
+          <p>
+            A neuron is a battery: pumps hold potassium inside the cell and sodium and chloride outside, and each gradient pulls the membrane toward its own <b>Nernst potential</b>. The <b>Goldman–Hodgkin–Katz equation</b> weighs those pulls by how permeable the membrane is to each ion and gives the resting potential. A <b>Hodgkin–Huxley</b> membrane then shows how voltage-gated channels turn that resting potential into an action potential. Change a concentration, a permeability, the temperature or a channel drug and both models update together. <span class="badge math">math</span> Everything on the tab is integrated from the equations; no learned model is involved.
+          </p>
+        </section>
+
+        <section id="about-benchmark">
+          <h2>{BENCH.title}</h2>
+          <p>{BENCH.lead}</p>
+          <h3>The four stages</h3>
+          <ol class="doc-steps">
+            {BENCH.stages.map((st) => (<li><b>{st.name}.</b> {st.body}</li>))}
+          </ol>
+        </section>
+        </div>
+
+        <section id="about-limits">
+          <h2>Scope and limits</h2>
+          <p>{COVER.honesty}</p>
+          <p class="doc-foot">Every word the studio uses is defined on the <button class="linkish" data-goto="glossary">Glossary</button> tab, with the line between what is mathematics and what is AI, and the technical specification.</p>
+        </section>
+      </article>
+    </div>
+  </section>
+
+  <!-- Three columns where there is room: the list of experiments, the
+       experiment itself, and beside it what the experiment IS — the rows that
+       name what varies, what is held still and what is measured, the ledger
+       of who did what, and the brain for the two that use it. The reader
+       sees the instrument before pressing anything, and the cortex changes
+       regime in view of the chart rather than a screen below it. -->
+  <section class="tabpanel" data-panel="inv" hidden>
+    <div class="inv-layout">
+      <nav class="inv-nav" id="inv-nav" aria-label="investigations"></nav>
+      <div class="col">
+        <section class="panel"><div id="inv-body"></div></section>
+      </div>
+      <aside class="col inv-aside">
+        <section class="panel" id="inv-about" aria-label="what this experiment is"></section>
+        <div id="inv-stage-slot" class="col"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- Set up on the LEFT, watch on the RIGHT, and nothing else. Two panes that
+       fill the window, one scroll in each, no page scroll: every other thing
+       that used to live here — the masthead, the session history, the link out
+       to the EEG benchmark, the chat drawer over the top — was a way to leave
+       the one job this tab has. -->
+  <section class="tabpanel workspace" data-panel="sim">
+    <div class="workspace-grid">
+      <div class="pane pane-left">
+        <section class="panel bench">
+          <div class="panel-head"><h2>Control bench</h2></div>
+
+          <div class="mode-switch" role="tablist" aria-label="how to set the state up">
+            <button role="tab" class="ms-btn" data-bench-mode="preset" aria-selected="true" title="Twelve conditions and fifteen compounds, integrated in your browser by the equations — no AI, no network">pick a preset <span class="badge math" title={math}>math</span></button>
+            <button role="tab" class="ms-btn" data-bench-mode="describe" aria-selected="false" title="Say what you want in clinical language and Cajal proposes the settings — needs the local relay, and nothing runs until you confirm">describe it <span class="badge ai">AI</span></button>
+          </div>
+
+          <!-- the ONE scroll in this pane: the conversation or the controls,
+               with the composer pinned under it as the pane's last child -->
+          <div class="pane-scroll">
+
+          <!-- Describe mode IS a conversation, so it looks like one: the
+               transcript sits in the engine with the composer under it, and a
+               proposal arrives as a card inside the message that made it,
+               carrying its own confirm button. This is the studio's ONE
+               conversation — there is no second chat over the top of it. -->
+          <div id="bench-describe" hidden>
+            <p class="caption">{SIM.describe}</p>
+            <div class="messages bench-messages" id="bench-messages"><p class="empty" id="bench-messages-empty">Nothing proposed yet.</p></div>
+          </div>
+
+          <div id="bench-preset">
+          <p class="caption">A treatment acts <b>on top of</b> a condition, so choose the condition first.</p>
+          <label class="field-label" for="preset">condition</label>
+          <select id="preset" aria-label="condition" class="wide">
+            {PRESET_GROUPS.map(([g, label]) => (
+              <optgroup label={label}>
+                {PRESETS.filter((p) => p.group === g).map((p) => <option value={p.id}>{p.title}</option>)}
+              </optgroup>
+            ))}
+          </select>
+          <p class="dim blurb" id="preset-blurb"></p>
+          <label class="field-label" for="treatment">treatment</label>
+          <select id="treatment" aria-label="treatment" class="wide">
+            <option value="none">no treatment</option>
+            <optgroup label="clinical medications">
+              {TREATMENTS.filter((t) => t.group === 'clinical').map((t) => <option value={t.id}>{t.name}</option>)}
+            </optgroup>
+            <optgroup label="lab compounds">
+              {TREATMENTS.filter((t) => t.group === 'lab').map((t) => <option value={t.id}>{t.name}</option>)}
+            </optgroup>
+          </select>
+          <div class="knob dose"><label for="dose">dose · 100% is a typical clinical effect</label><output id="dose-out">100%</output><input id="dose" type="range" min="0" max="150" step="5" value="100" /></div>
+          <p class="dim blurb" id="treatment-blurb"></p>
+          <p class="pending" id="bench-pending" hidden>Settings changed. The brain still shows the previous run — press <b>run the brain</b> to apply them.</p>
+          <div class="bench-row">
+            <button class="btn primary" id="bench-brain" title="integrates the regional equations across all 85 regions">run the brain</button>
+            <button class="btn" id="bench-compare" disabled title="runs the same condition without the drug and tables the difference">compare with untreated</button>
+            <button class="btn" id="bench-micro" title="drops into a local spiking microcircuit and draws every spike">run cell by cell</button>
+          </div>
+          <details>
+            <summary>knobs</summary>
+            <div class="knobs" id="knobs">
+              {['excitability', 'inhibition', 'coupling', 'noise', 'adaptation', 'arousal'].map((k) => (
+                <div class="knob"><label for={`knob-${k}`}>{k}</label><output id={`out-${k}`}>1.00</output><input id={`knob-${k}`} data-knob={k} type="range" min="0" max="3" step="0.05" value="1" /></div>
+              ))}
+              <div class="knob"><label for="knob-duration">duration ms</label><output id="out-duration">3000</output><input id="knob-duration" data-knob="duration_ms" type="range" min="500" max="8000" step="100" value="3000" /></div>
+            </div>
+            <dl class="keyed" style="margin-top:10px">
+              {KNOBS.map(([k, d]) => (<><dt>{k}</dt><dd>{d}</dd></>))}
+            </dl>
+            <p class="dim" style="font-size:12px;margin:8px 0 0">1 is the awake baseline for every knob; 0 is off. A knob you touch overrides the condition's value; small steps (0.2–0.5) change a state, large ones saturate the model.</p>
+          </details>
+          </div>
+
+          <div class="composition" id="composition" hidden>
+            <div class="label">active regional modulation</div>
+            <dl id="composition-rows"></dl>
+          </div>
+
+            <section class="panel effect" id="effect-panel" hidden>
+              <div class="panel-head"><h2>Treatment effect <span class="badge math" title={math}>math</span></h2><span class="ab"><button class="btn sm" id="ab-untreated" aria-pressed="false">untreated</button><button class="btn sm" id="ab-treated" aria-pressed="true">treated</button></span></div>
+              <p class="caption" id="effect-caption"></p>
+              <table class="loop-table" id="effect-table">
+                <thead><tr><th>measure</th><th>untreated</th><th>treated</th><th>change</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p class="caption" id="effect-regions"></p>
+              <p class="caption">A treatment here is a set of multipliers on the model's parameters, chosen to match what the drug does at its receptor. It shows the direction and rough size of an effect, not a dose-response or a prediction for any patient.</p>
+            </section>
+          </div>
+
+          <!-- The composer belongs to describe mode and is hidden with it.
+               It is the pane’s last child and cannot scroll away, so left in
+               place under preset mode it took the bottom third of the bench
+               for an input that does nothing there — and with no relay it is
+               a dead textarea over controls that work. The disclaimer that
+               used to sit under it is a row of "how to read the brain" now
+               (2026-09-19): the owner's call, so the bench fits its pane. -->
+          <div class="bench-composer" id="bench-composer" hidden>
+            <div id="describe-composer" hidden>
+              <textarea id="describe-in" rows="3" placeholder="A left temporal focal seizure that spreads to the contralateral hemisphere" aria-label="describe the state to simulate"></textarea>
+              <div class="bench-row">
+                <button class="btn primary" id="describe-go">design the simulation</button>
+                <span class="dim" id="describe-status" style="font-size:12px"></span>
+              </div>
+              <p class="offline-note" id="offline" hidden>
+                Cajal is not connected: this build has no relay, so describing a state is unavailable. Everything under <b>pick a preset</b> runs in your browser and needs nothing. To connect the agent, run <span class="mono">npm run models</span>, <span class="mono">npm run serve</span> and <span class="mono">npm run a2a</span>, set <span class="mono">CAJAL_RELAY</span> in <span class="mono">.env</span>, and rebuild.
+              </p>
+            </div>
+          </div>
+        </section>
+
+      </div>
+      <div class="pane pane-right">
+        <div class="pane-scroll col" id="sim-stage-slot">
+        <div id="stage" class="col">
+          <section class="panel" id="brain-panel">
+            <div class="panel-head">
+              <h2>Brain view <span class="badge math" title={math}>math</span></h2>
+              <span class="head-right"><span class="label" id="run-kind">nothing loaded</span></span>
+            </div>
+            <div class="brain-wrap">
+              <canvas id="brain-gl" aria-hidden="true"></canvas>
+              <canvas id="brain" aria-label="the brain view: a real cortical surface lit by regional activity"></canvas>
+              <div class="slices" id="slices" data-plane="all" hidden>
+                <canvas class="slice" id="slice-sagittal" aria-label="sagittal section"></canvas>
+                <canvas class="slice" id="slice-coronal" aria-label="coronal section"></canvas>
+                <canvas class="slice" id="slice-axial" aria-label="axial section"></canvas>
+              </div>
+              <!-- The head-up display is ONE column — title, then the view
+                   controls, then the chips — so a title that wraps on a
+                   narrow screen pushes the row under it down instead of
+                   running underneath it. Three separately-pinned overlays
+                   collided at 600px; a stack cannot. -->
+              <div class="brain-hud">
+                <div class="brain-title"><span class="t" id="run-title">nothing loaded yet</span></div>
+                <div class="view-btns">
+                  <button class="btn sm" id="mode-organ" aria-pressed="true" title="surface: the outer cortical envelope; hover to name the region under the cursor">organ</button>
+                  <button class="btn sm" id="mode-depth" aria-pressed="false" title="internal anatomy: the cortex made see-through to reveal the deep structures and the wiring">depth</button>
+                  <button class="btn sm" id="mode-slice" aria-pressed="false" title="orthogonal planes: axial, coronal and sagittal cross-sections">slice</button>
+                  <span class="view-sep"></span>
+                  <button class="btn sm" id="view-orbit" aria-pressed="true" title="slow orbit">orbit</button>
+                  <button class="btn sm" id="view-lateral" title="from the left side">side</button>
+                  <button class="btn sm" id="view-dorsal" title="from above">top</button>
+                  <button class="btn sm" id="view-front" title="from the front">front</button>
+                  <!-- in slice mode the four views give way to the planes:
+                       one section, or all three where the width allows -->
+                  <span class="slice-tabs" id="slice-tabs" role="group" aria-label="which section to show" hidden>
+                    <button class="btn sm" data-plane="sagittal" aria-pressed="false" title="the side-on section">sagittal</button>
+                    <button class="btn sm" data-plane="coronal" aria-pressed="false" title="the front-on section">coronal</button>
+                    <button class="btn sm" data-plane="axial" aria-pressed="false" title="the section from above">axial</button>
+                    <button class="btn sm" data-plane="all" aria-pressed="true" title="all three, side by side">all</button>
+                  </span>
+                  <span class="view-sep"></span>
+                  <button class="btn sm" id="zoom-out" title="zoom out a little">−</button>
+                  <button class="btn sm" id="zoom-in" title="zoom in a little">+</button>
+                </div>
+                <div class="state-chips" id="state-chips" aria-live="polite" aria-label="what this run is"></div>
+              </div>
+              <div class="annotation" id="annotation" hidden></div>
+              <div class="brain-legend"><span class="swatch matter"></span><span>resting tissue</span><span class="scale"><i>0</i><span class="ramp" id="scale-ramp"></span><i>1</i></span><span>excitation</span><span id="legend-extra"></span><span class="dim" id="mode-note"></span></div>
+              <div class="brain-hover" id="hover"></div>
+              <!-- A run is computed and then replayed, and the moment it starts
+                   is the one thing the page never said out loud. This says it,
+                   over the picture it is about, and then gets out of the way. -->
+              <div class="brain-toast" id="brain-toast" role="status" aria-live="polite" hidden></div>
+            </div>
+            <!-- where the view controls sit on a phone: under the picture
+                 rather than over it (client.ts moves `.view-btns` here below
+                 560px and back into the head-up display above it) -->
+            <div class="view-row" id="view-row"></div>
+            <!-- NOTHING WITH TEXT SITS OVER THE SUBJECT. The slice bar used to
+                 be a row inside the picture and on a phone it ran over the
+                 section; it lives under the frame now, in slice mode only. -->
+            <div class="slice-bar" id="slice-bar" hidden>
+              <span class="dim" id="slice-focus"></span>
+              <button class="btn sm" id="slice-peak" title="move the cut to the region this run is about">go to the run's region</button>
+            </div>
+            <div class="controls">
+              <button class="btn" id="play" aria-pressed="false" disabled>play</button>
+              <span class="scrub-wrap"><div class="phase-strip" id="phase-strip" hidden></div><input class="scrub" id="scrub" type="range" min="0" max="0" value="0" step="1" aria-label="time" disabled /></span>
+              <span class="time" id="time">—</span>
+              <select id="speed" aria-label="playback speed">
+                <option value="0.125">⅛ speed</option>
+                <option value="0.25" selected>¼ speed</option>
+                <option value="0.5">½ speed</option>
+                <option value="1">real time</option>
+              </select>
+            </div>
+            <details class="howto">
+              <summary>how to read the brain</summary>
+              <p class="caption"><b>What this is.</b> A <b>cortical surface rendering</b>: a model cortex with each region shaded by its simulated firing rate, played forward through the run. Surface renderings like this are a standard way of presenting results in neuroimaging and computational neuroscience, used to study the spatial and temporal pattern of activity — which regions are active, in what order, and whether activity stays focal or spreads.</p>
+              <dl class="keyed">
+                <dt>organ</dt><dd>The anatomical surface at full resolution. Hover anywhere for the atlas label of the parcel under the cursor.</dd>
+                <dt>depth</dt><dd>The cortex made semi-transparent, revealing the deep nuclei and the long-range wiring at their true depth; nearer structures are drawn larger.</dd>
+                <dt>slice</dt><dd>Orthogonal cross-sections: sagittal, coronal and axial through one point. Hover to name a region, click a pane to move the cutting planes. Nothing is highlighted until you hover it.</dd>
+                <dt>colour</dt><dd><b>Grey</b> is quiescent tissue at rest, so a resting cortex still reads as anatomy. Excitation paints over it on the Turbo scale — blue through green and yellow to red, where a region saturates — and tracks the region's population firing rate directly.</dd>
+                <dt>playback</dt><dd>Quarter speed by default, so a travelling wave is slow enough to follow across the surface.</dd>
+                <dt>zoom</dt><dd>The − and + buttons, or pinch (ctrl-scroll) over a view, zoom a little; double-click to reset.</dd>
+                <dt>phases</dt><dd>Runs with stages are annotated: the bar under the scrubber marks each phase, the line under the title says what is happening now, and a white ring marks a region only while it is stimulated.</dd>
+                <dt>what it is not</dt><dd>A run shows the kind of dynamics a cortex has under a condition, on a <b>synthetic</b> connectome. It is never a measurement of anyone's brain; the full statement is on <button class="linkish" data-goto="about">About</button>.</dd>
+              </dl>
+            </details>
+          </section>
+
+          <section class="panel" id="contrast-panel" hidden>
+            <div class="panel-head">
+              <h2>Against the awake baseline <span class="badge math" title={math}>math</span></h2>
+              <span class="label" id="contrast-sub"></span>
+            </div>
+            <p class="caption" id="contrast-lead">Seen from above, anterior up, left hemisphere on the left: each region coloured by its <b>mean</b> excitation over the whole run, so these averages sit below the peaks the animation paints. The two activity stills share one window, printed below.</p>
+            <div class="contrast-grid">
+              <figure><canvas class="contrast-still" id="contrast-a" aria-label="still picture of the awake baseline run, regions coloured by mean activity"></canvas><figcaption>Awake, resting <span class="dim" id="contrast-a-sub"></span></figcaption></figure>
+              <figure><canvas class="contrast-still" id="contrast-b" aria-label="still picture of the run on screen, regions coloured by mean activity"></canvas><figcaption id="contrast-b-cap">this run <span class="dim" id="contrast-b-sub"></span></figcaption></figure>
+              <figure><canvas class="contrast-still" id="contrast-d" aria-label="the difference between the two: each region coloured by how far its mean activity moved"></canvas><figcaption>The difference <span class="dim" id="contrast-d-sub"></span></figcaption></figure>
+            </div>
+            <div class="contrast-legends">
+              <span class="scale"><i>0</i><span class="ramp" id="contrast-ramp"></span><i id="contrast-act-hi">–</i></span><span>mean activity, both left pictures on one scale</span>
+              <span class="sep"></span>
+              <span class="scale"><i id="contrast-lo">−</i><span class="ramp" id="contrast-ramp-diff"></span><i id="contrast-hi">+</i></span><span>change against awake: blue quieter, red busier, tissue grey unchanged</span>
+            </div>
+            <p class="caption" id="contrast-note"></p>
+            <p class="caption">The baseline is the <b>awake, resting</b> preset run by this page with the same equations. The difference scale is set by this pair's largest regional change, so two comparisons share a scale only when the printed number says so.</p>
+          </section>
+
+          <section class="panel" id="traces-panel">
+            <div class="panel-head"><h2><span id="traces-title">Readout · activity over time</span> <span class="badge math" title={math}>math</span></h2><span class="label" id="traces-sub"></span></div>
+            <div class="traces-grid">
+              <div>
+                <canvas class="trace" id="traces" aria-label="mean activity (orange) and synchrony (cyan) over time"></canvas>
+                <ul class="summary-lines" id="summary"></ul>
+              </div>
+              <div>
+                <div class="label" style="margin-bottom:6px">band power</div>
+                <div class="bands" id="bands">
+                  {['delta', 'theta', 'alpha', 'beta', 'gamma'].map((b) => (
+                    <div class="band"><span class="v" data-band-v={b}>–</span><div class="bar" data-band={b} style="height:2px"></div><span class="n">{b}</span></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <ul class="notes" id="notes" hidden></ul>
+            <details class="howto">
+              <summary>how to read the numbers</summary>
+              <p class="caption"><b>What this is.</b> Two standard views of one signal: a <b>time series</b> and its <b>band power</b>. The line is the simulated activity of all 85 regions averaged into a single value at each moment; the bars beside it show how that signal’s power divides among the conventional EEG frequency bands. This pair is the routine readout in electrophysiology — waking, sleep, anaesthesia and seizure are distinguished far more by the shape and frequency content of such a trace than by any single instant of it.</p>
+              <dl class="keyed">
+                <dt>mean activity</dt><dd>The spatial average of excitation across all 85 regions, moment by moment: the orange line above, named on the chart itself. In the modelling literature this quantity is the <b>mean field</b>. Low and steady means sparse, local firing.</dd>
+                <dt>amplitude</dt><dd>How big the swings of that average are, as a root-mean-square. Large amplitude means the whole cortex is rising and falling together rather than idling.</dd>
+                <dt>synchrony (cyan)</dt><dd>How much of the regions' variation is shared: the variance of the mean field divided by the average variance of the individual regions. 0 is independent, 1 is lockstep. Wakefulness sits at 0.1–0.3, deep sleep and seizure above 0.6. This is a shared-variance ratio, not a Kuramoto phase order parameter.</dd>
+                <dt>dominant rhythm</dt><dd>The strongest single frequency, with the band holding the largest share of power. When activity collapses there is no rhythm to name, and the readout says so instead of naming one.</dd>
+                <dt>band power</dt><dd>The signal split by rhythm: delta 1–4 Hz (deep sleep), theta 4–8 (drowsiness), alpha 8–13 (relaxed wakefulness), beta 13–30 (alert processing), gamma 30–80 (local computation).</dd>
+                <dt>left / right</dt><dd>Mean activity per hemisphere, and the correlation between each region and its mirror image on the other side.</dd>
+                <dt>most active</dt><dd>The four regions with the highest mean excitation over the run, on the same 0–1 scale as the brain view.</dd>
+                <dt>first responders</dt><dd>Only after a stimulus: the regions that rose 3 standard deviations above their own baseline earliest, and how long after stimulus onset they did. This is a <b>response latency</b>.</dd>
+                <dt>entrained</dt><dd>Only after a rhythmic stimulus: regions whose power at the driving frequency grew, and by what factor, measured during the drive against before it. Stimulated regions are excluded, so <b>entrainment</b> here means a region that followed the rhythm rather than one that was given it.</dd>
+                <dt>notes</dt><dd>First readings generated by fixed rules, not by a model. The numbers above them are the evidence.</dd>
+              </dl>
+            </details>
+          </section>
+
+          <section class="panel" id="aux-panel" hidden>
+            <div class="panel-head"><h2><span id="aux-title">Cell by cell</span> <span class="badge math" id="aux-badge" title={math}>math</span></h2><span class="label" id="aux-sub"></span></div>
+            <canvas class="raster" id="raster" aria-label="spike raster"></canvas>
+            <img class="aux-img" id="aux-img" alt="" hidden />
+            <ul class="summary-lines" id="aux-summary"></ul>
+            <p class="caption" id="aux-caption">Each dot is one neuron firing once: orange excitatory, cyan inhibitory, time left to right; the line underneath counts spikes per millisecond.</p>
+          </section>
+        </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="tabpanel" data-panel="neuron" hidden>
+    <div class="grid2">
+      <div class="col">
+        <section class="panel">
+          <div class="panel-head"><h2>Membrane settings <span class="badge math" title={math}>math</span></h2><button class="btn sm" id="nc-reset" title="return every control to the baseline resting neuron">reset to baseline</button></div>
+          <label class="field-label" for="nc-condition">condition</label>
+          <select id="nc-condition" class="wide">
+            {NEURON_CONDITIONS.map((c) => <option value={c.id}>{c.title}</option>)}
+            <option value="custom">custom</option>
+          </select>
+          <p class="dim blurb" id="nc-condition-blurb"></p>
+          <div class="label" style="margin-top:10px">01 · transmembrane gradients</div>
+          <div class="knobs">
+            {ION_SLIDERS.map(([k, label, lo, hi, step]) => (
+              <div class="knob"><label for={`nc-${k}`}>{label}</label><output id={`nc-out-${k}`}></output><input id={`nc-${k}`} data-neuron-control data-ion={k} type="range" min={lo} max={hi} step={step} /></div>
+            ))}
+          </div>
+          <div class="label" style="margin-top:10px">02 · relative resting permeability (P / P_K, log scale)</div>
+          <div class="knobs">
+            {[['K', 'P_K'], ['Na', 'P_Na'], ['Cl', 'P_Cl']].map(([k, label]) => (
+              <div class="knob"><label for={`nc-P${k}`}>{label}</label><output id={`nc-out-P${k}`}></output><input id={`nc-P${k}`} data-neuron-control data-perm={k} type="range" min="-3" max="1.5" step="0.01" /></div>
+            ))}
+            <div class="knob"><label for="nc-temp">temperature</label><output id="nc-out-temp"></output><input id="nc-temp" data-neuron-control type="range" min="0" max="45" step="1" /></div>
+          </div>
+          <label class="field-label" for="nc-drug" style="margin-top:10px">channel drug</label>
+          <select id="nc-drug" class="wide">
+            {NEURON_DRUGS.map((d) => <option value={d.id}>{d.title}</option>)}
+          </select>
+          <p class="dim blurb" id="nc-drug-blurb"></p>
+          <div class="label" style="margin-top:10px">03 · environment and stimulus</div>
+          <div class="knobs">
+            <div class="knob"><label for="nc-current">current step</label><output id="nc-out-current"></output><input id="nc-current" data-neuron-control type="range" min="-5" max="60" step="0.5" /></div>
+            <div class="knob"><label for="nc-pulse">step length</label><output id="nc-out-pulse"></output><input id="nc-pulse" data-neuron-control type="range" min="5" max="250" step="5" /></div>
+          </div>
+          <div class="label" style="margin-top:12px">things to try</div>
+          <dl class="keyed">
+            <dt>hyperkalaemia</dt><dd>Raise potassium outside. The resting potential depolarises, firing speeds up, then stops in depolarisation block once the sodium channels can no longer reset. The curve from investigation two.</dd>
+            <dt>GABA-A</dt><dd>Raise P_Cl. E_Cl sits near rest so the voltage barely moves, but the extra conductance shunts the injected current out before it reaches threshold.</dd>
+            <dt>tetrodotoxin</dt><dd>Block the sodium channels. Spikes vanish and only the passive charging curve is left.</dd>
+            <dt>hypothermia</dt><dd>Drop to 10–20 °C. Q10 slows the gates: broad, sluggish spikes and long refractory periods, with the equilibrium potentials unchanged.</dd>
+          </dl>
+        </section>
+      </div>
+      <div class="col">
+        <section class="panel">
+          <div class="panel-head"><h2>Resting potential · Goldman–Hodgkin–Katz <span class="badge math" title={math}>math</span></h2></div>
+          <canvas class="membrane" id="membrane-canvas" aria-label="a patch of membrane: each ion's concentration inside and outside, its channels, and which way it is being driven"></canvas>
+          <p class="caption">One patch of membrane, set to the controls. Dots show concentration, the width of each pore its permeability, and the weight of each arrow the resting flux — permeability × driving force (V<sub>m</sub> − E<sub>ion</sub>) — all relative to the largest of the three. Sodium is pulled hard inward but its resting channels are nearly shut, which is why <b>potassium sets the resting potential</b>.</p>
+          <canvas class="ghk" id="ghk-canvas" aria-label="the voltage axis with each ion's Nernst potential and the Goldman resting potential"></canvas>
+          <pre class="equation" id="ghk-eq"></pre>
+          <table class="loop-table" id="ion-table">
+            <thead><tr><th>ion</th><th>inside [i]</th><th>outside [o]</th><th>Nernst potential E</th><th>relative permeability P</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p class="caption">
+            The white marker is the resting potential. It sits just above E_K because the resting membrane is twenty-five times more permeable to potassium than to sodium. Raise P_Na, as the upstroke of a spike does, and V<sub>m</sub> swings toward E_Na; raise potassium outside and E_K, and the resting potential with it, move toward threshold.
+          </p>
+          <details class="howto">
+            <summary>how to read the resting potential</summary>
+            <p class="caption"><b>What this is.</b> A schematic patch of cell membrane above a voltage axis. The schematic shows the three permeant ions — potassium, sodium and chloride — at their intracellular and extracellular concentrations, with the channels that let them cross; the axis places each ion's <b>equilibrium potential</b> and the <b>resting membrane potential</b> the three of them produce together. This is the standard account of how a neuron holds a voltage across its membrane, and it is what every condition and channel drug on this tab acts on.</p>
+            <dl class="keyed">
+              <dt>equilibrium potential (E)</dt><dd>The voltage at which an ion's concentration gradient and the electrical force on it cancel, so there is no net flow. One value per ion, given by the <b>Nernst equation</b> and printed in the table.</dd>
+              <dt>membrane potential (V<sub>m</sub>)</dt><dd>The actual voltage across the membrane, the thick white mark on the axis. The <b>Goldman–Hodgkin–Katz equation</b> places it as a permeability-weighted average of the three equilibrium potentials, so the ion with the most open channels pulls hardest.</dd>
+              <dt>permeability (P)</dt><dd>How readily the membrane passes each ion, stated relative to the others rather than in absolute units. At rest potassium's is much the largest, which is why V<sub>m</sub> sits close to E_K.</dd>
+              <dt>driving force</dt><dd>V<sub>m</sub> − E for one ion: how far the membrane sits from the voltage that ion alone would impose, and therefore which way that ion is pushed. The arrows in the schematic are weighted by permeability × driving force, so a large gradient through shut channels draws a small arrow.</dd>
+              <dt>what it is not</dt><dd>A textbook membrane with three permeant ions, not a particular cell type, and not a recording from any cell. The ion pumps that maintain these gradients are not drawn: a condition such as ouabain acts here by setting the concentrations it would leave behind.</dd>
+            </dl>
+          </details>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><h2>Action potential · Hodgkin–Huxley <span class="badge math" title={math}>math</span></h2></div>
+          <canvas class="hh" id="hh-canvas" aria-label="membrane potential over time"></canvas>
+          <canvas class="gates" id="gate-canvas" aria-label="gating variables m, h and n over time"></canvas>
+          <ul class="summary-lines" id="hh-summary"></ul>
+          <ul class="notes" id="hh-notes" hidden></ul>
+          <div class="label" style="margin-top:10px">the gating sequence</div>
+          <ol class="loop-steps">
+            <li><b>Trigger.</b> The current step (the orange bar) charges the membrane until the potential crosses threshold, the value printed in the summary above.</li>
+            <li><b>Upstroke.</b> Depolarisation opens the fast <b>m</b> gates; sodium floods in and pulls V<sub>m</sub> toward E_Na, which opens more gates.</li>
+            <li><b>Downstroke.</b> Near the peak the slower <b>h</b> gates shut sodium off while the <b>n</b> gates open potassium, driving the potential back toward E_K.</li>
+            <li><b>Reset.</b> The <b>h</b> gates only reopen once the voltage is negative again. That is the refractory period, and it is what never happens in depolarisation block.</li>
+          </ol>
+          <p class="caption">
+            Reversal potentials are the Nernst values in the table above; the leak reverses at the Goldman potential. Gating kinetics are Hodgkin and Huxley's own, scaled by Q10 = 3 so that 37 °C runs at reference speed: a textbook membrane, not a particular cell type.
+          </p>
+          <details class="howto">
+            <summary>how to read the action potential</summary>
+            <p class="caption"><b>What this is.</b> A <b>membrane potential trace</b> — the cell's voltage plotted against time while a current is injected — with the <b>gating variables</b> of the Hodgkin–Huxley model plotted underneath it. This is the conventional way an action potential is presented, and the Hodgkin–Huxley model is where the presentation comes from: the 1952 description of the squid giant axon that conductance-based neuron models still build on.</p>
+            <dl class="keyed">
+              <dt>the white trace</dt><dd>Membrane potential in millivolts against time. Each sharp excursion is one <b>action potential</b>, or spike.</dd>
+              <dt>the orange bar</dt><dd>When the injected current is on, and at what strength. A step too small to bring the membrane to threshold produces no spike at all: the trace only charges and settles.</dd>
+              <dt>the dashed lines</dt><dd>E_Na, E_K and V<sub>m</sub> (GHK) carried over from the panel above, on this voltage axis. A spike rises toward E_Na and falls back past rest toward E_K without reaching either, because both channel populations are open at once.</dd>
+              <dt>m, h and n</dt><dd>The gating variables, each between 0 and 1: the fraction of that gate population currently open. <b>m</b> opens the sodium channels, <b>h</b> inactivates them, <b>n</b> opens the potassium channels. Their order is the mechanism of the spike, stepped through above.</dd>
+              <dt>firing</dt><dd>The spike count and the rate in hertz during the current step, printed in the summary. A neuron that fires faster as the current rises is behaving normally; one that stops firing as the current rises is in <b>depolarisation block</b>.</dd>
+            </dl>
+          </details>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section class="tabpanel" data-panel="bench" hidden>
+    <div class="grid2">
+      <div class="col">
+        <section class="panel loop">
+          <div class="panel-head"><h2>Run the test</h2><span class="label">closed loop · the studio grades itself</span></div>
+          <div class="bench-row">
+            <select id="loop-model" aria-label="model for the test">
+              <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite · about 10 s</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash · about 30 s</option>
+              <option value="ollama/cajal-qwen">ollama/cajal-qwen · local, several minutes</option>
+            </select>
+            <button class="btn primary" id="loop-run">run the closed-loop benchmark</button>
+            <span class="dim" id="loop-status" style="font-size:12px"></span>
+          </div>
+
+          <ol class="run-stages" id="loop-stages">
+            <li data-state="idle"><b>1 · Define</b><span class="s">not started</span></li>
+            <li data-state="idle"><b>2 · Simulate and project</b><span class="s">not started</span></li>
+            <li data-state="idle"><b>3 · Decompose and encode</b><span class="s">not started</span></li>
+            <li data-state="idle"><b>4 · Discriminate and score</b><span class="s">not started</span></li>
+          </ol>
+
+          <div class="defined" id="loop-defined" hidden>
+            <div class="label">what the reasoning model defined, before anything ran <span class="badge ai">AI</span></div>
+            <p class="caption" id="loop-defined-note"></p>
+            <details><summary>the model's raw output, as it returned it</summary><pre class="raw" id="loop-defined-raw"></pre></details>
+          </div>
+
+          <details class="howto" id="loop-log-box" hidden>
+            <summary>the full log, line by line</summary>
+            <ol class="loop-log" id="loop-log"></ol>
+          </details>
+        </section>
+      </div>
+
+      <div class="col">
+        <!-- the result first, then the evidence it was drawn from -->
+        <section class="panel" id="loop-scoreboard" hidden>
+          <div class="panel-head"><h2>Benchmark result</h2><span class="label" id="loop-score-sub"></span></div>
+          <div class="loop-verdict" id="loop-verdict"></div>
+          <ul class="summary-lines" id="loop-score-lines"></ul>
+          <p class="caption" id="loop-score-note"></p>
+        </section>
+
+        <section class="panel" id="loop-eeg-panel">
+          <div class="panel-head">
+            <h2>The recordings <span class="badge math" title={math}>math</span></h2>
+            <span class="head-right">
+              <span class="label">19-channel scalp EEG</span>
+              <label class="opt"><input type="checkbox" id="eeg-all-channels" /> all 19 channels</label>
+              <label class="opt"><input type="checkbox" id="eeg-shared-scale" /> one scale for all states</label>
+            </span>
+          </div>
+          <p class="caption">{BENCH.reading}</p>
+          <ol class="eeg-strips" id="loop-eegs"></ol>
+          <p class="caption dim" id="loop-eegs-empty">Nothing has run yet. Each state's recording appears here as the test computes it.</p>
+          <details class="howto">
+            <summary>how to read a recording</summary>
+            <p class="caption"><b>What this is.</b> A <b>scalp EEG</b>: the voltage at each electrode plotted against time, one row per channel, stacked front to back across the head. Every strip here is simulated — a whole-brain run projected onto 19 electrode positions of the international <b>10–20 system</b> — but it is drawn and analysed the way a clinical recording is, because that is what the test turns on: whether a model trained on real human EEG can separate states generated by equations.</p>
+            <dl class="keyed">
+              <dt>the rows</dt><dd>One per channel, named at the left in 10–20 notation. Six evenly spaced channels by default; tick <b>all 19 channels</b> for the full <b>montage</b>.</dd>
+              <dt>± µV</dt><dd>The vertical scale, printed on every strip in microvolts. Each recording is drawn to its own scale so its rhythm stays legible; tick <b>one scale for all states</b> to compare <b>amplitude</b> between states instead.</dd>
+              <dt>the gridlines</dt><dd>One second apart, labelled every other second along the bottom.</dd>
+              <dt>δ θ α β γ</dt><dd>The <b>band power</b> of that same recording: the share of its power in each conventional band — delta 1–4 Hz, theta 4–8, alpha 8–13, beta 13–30, gamma 30–80.</dd>
+              <dt>the two readings</dt><dd>LaBraM's nearest-centroid pick with its confidence, and the blind judge's pick with its own stated certainty. Each strip reports what was said about it; whether it was right is the benchmark result above.</dd>
+              <dt>what it is not</dt><dd>A simulated recording, not a patient's. The forward projection is a distance-weighted kernel rather than a boundary-element head model, so electrode positions are approximate and only cortex contributes.</dd>
+            </dl>
+          </details>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section class="tabpanel" data-panel="glossary" hidden>
+    <div class="grid2">
+      <div class="col">
+        <section class="panel glossary" id="glossary">
+          <div class="panel-head"><h2>Glossary</h2><span class="label">the words this studio uses</span></div>
+          <dl>
+            {GLOSSARY.map(([term, def]) => (<><dt>{term}</dt><dd>{def}</dd></>))}
+          </dl>
+        </section>
+      </div>
+      <div class="col">
+        <section class="panel">
+          <div class="panel-head"><h2>What is AI here, and what is not</h2><span class="label">the line, kept in one place</span></div>
+          <p class="caption">The studio keeps a hard line between the equations that generate the dynamics and the learned models that read them. Nothing on the left was trained on anything; nothing on the right computes a trajectory. That separation is what makes a result here possible to disagree with.</p>
+          <dl class="keyed">
+            <dt><span class="badge math">math</span></dt><dd><b>The simulations.</b> The whole-brain model, the cell-by-cell model and the single neuron are systems of equations solved step by step on this machine. Same settings, same numbers, every time.</dd>
+            <dt><span class="badge math">math</span></dt><dd><b>The treatments.</b> Each compound is a set of multipliers on those equations’ parameters, written by hand from what the drug does at its receptor.</dd>
+            <dt><span class="badge math">math</span></dt><dd><b>The analysis.</b> Mean field, synchrony, band power, latencies and the EEG forward projection are classical signal processing. No model is involved in any of them.</dd>
+            <dt><span class="badge ai">AI</span></dt><dd><b>Cajal.</b> A language model that decides which tools to call and explains what they returned. It may not invent a number.</dd>
+            <dt><span class="badge ai">AI</span></dt><dd><b>LaBraM.</b> A network trained on real human EEG. It reads four seconds of all nineteen electrodes at once and returns a few hundred numbers describing that stretch. It names nothing: the benchmark tests only whether states that differ produce numbers that differ.</dd>
+            <dt><span class="badge ai">AI</span></dt><dd><b>The benchmark’s definer and judge.</b> Language models that design the four test states and, blind, name them back from an analysis.</dd>
+            <dt><span class="badge ai">AI</span></dt><dd><b>The other pre-trained models.</b> SwiFT and BrainGFM (fMRI), Geneformer and scGPT (single-cell), Cellpose-SAM (microscopy), each run when you hand Cajal a file. Any that is not configured falls back to classical analysis, and the result says which one ran.</dd>
+          </dl>
+        </section>
+        <section class="panel spec">
+          <div class="panel-head"><h2>Technical specification</h2></div>
+          <dl class="keyed">
+            <dt>disclaimer</dt><dd>cajal is a simulation studio and a testing harness for algorithms. It is not a clinical or diagnostic instrument, not certified as software in a medical device, and nothing in it should be read as advice about a person.</dd>
+            <dt>macroscale</dt><dd>Wilson–Cowan neural-mass formulation over 85 regions: 68 Desikan–Killiany cortical parcels plus 17 deeper nodes — subcortical nuclei, cerebellum and brainstem — on a <b>synthetic</b> distance-rule connectome with conduction delays. The wiring is generated, not measured tractography.</dd>
+            <dt>the solver</dt><dd>Plain TypeScript with no dependencies, integrated on the CPU. One copy of it serves both the agent’s tools and this page, so a run makes the same numbers wherever it was started.</dd>
+            <dt>geometry</dt><dd>FreeSurfer fsaverage cortex; cerebellum and brainstem from the MNI152 template; sections from the MNI152 T1.</dd>
+            <dt>microscale</dt><dd>Sparse random networks of Izhikevich spiking neurons.</dd>
+            <dt>single neuron</dt><dd>Nernst and Goldman–Hodgkin–Katz equations; Hodgkin–Huxley membrane with Q10 temperature scaling.</dd>
+            <dt>AI stack</dt><dd>EEG: LaBraM (active). fMRI: SwiFT, BrainGFM. Single-cell: Geneformer, scGPT. Imaging: Cellpose-SAM. All of them run locally on PyTorch. Agent: Cajal on the Melchizedek runtime (Gemini, or a local Qwen through Ollama).</dd>
+            <dt>architecture</dt><dd>Four local services: <span class="mono">:8945</span> Python inference (<span class="mono">npm run models</span>); <span class="mono">:8935 / :8975</span> the simulation tools and this page's event-stream relay (<span class="mono">npm run serve</span>); <span class="mono">:4010</span> the Melchizedek agent service (<span class="mono">npm run a2a</span>); and the page itself (<span class="mono">npm run dev</span>). All four bind to loopback only.</dd>
+            <dt>where your data goes</dt><dd><b>Every simulation runs on this machine</b>, as does LaBraM and every other pre-trained model: no recording, image or dataset you open is uploaded. The conversational agent is the exception. By default Cajal is served by Gemini, so the text of your questions and the tool results it reads are sent to that API. Point it at the local Qwen build (<span class="mono">cajal_local</span>) and nothing leaves the machine at all.</dd>
+          </dl>
+        </section>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script>
+  import { start } from '../lib/client.ts';
+  start();
+</script>

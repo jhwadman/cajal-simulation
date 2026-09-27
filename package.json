@@ -1,0 +1,24 @@
+{
+  "name": "cajal-simulation",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "description": "cajal, the simulation alone: a whole-brain neural-mass model on a synthetic connectome, run and drawn entirely in the browser.",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "astro dev --port 4360",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test service/tests/*.test.ts"
+  },
+  "dependencies": {
+    "astro": "^5.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "typescript": "^5.9.3"
+  }
+}

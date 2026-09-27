@@ -1,0 +1,66 @@
+---
+/**
+ * Base layout: <head>, header, footer. One page today; the layout exists so
+ * a second cannot drift from it. No analytics, no external requests: the
+ * page's only network traffic is the loopback relay, and only when
+ * CAJAL_RELAY is set at build. The three webfonts are SELF-HOSTED and are
+ * lyceumagents.com's own files (see global.css); Inter and iA Writer Mono
+ * Regular are preloaded because the studio's first paint carries prose and
+ * numbers at once, Josefin is not — it swaps in over Inter.
+ */
+import '../styles/global.css';
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const SITE = 'cajal';
+const {
+  title,
+  description = 'A brain simulation studio: a Melchizedek agent drives a whole-brain neural-mass model, a spiking microcircuit and pre-trained neuroscience models, and the page draws what they did.',
+} = Astro.props;
+const pageTitle = title ? `${title} · ${SITE}` : SITE;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#06080c" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <link rel="preload" href="/fonts/InterVariable-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/iAWriterMonoS-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="header-inner">
+        <a href="/" class="brand" aria-label="cajal — home">
+          <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0c1017"/><g fill="none" stroke="#35d6ff" stroke-width="1.6" stroke-linecap="round"><path d="M10 22c-3-2-4-6-2-9s5-5 8-5 6 1 8 4 1 7-2 9"/><path d="M16 8v16M10 14h12M12 19h8"/></g><circle cx="16" cy="14" r="2.4" fill="#fff"/><circle cx="10" cy="14" r="1.4" fill="#35d6ff"/><circle cx="22" cy="14" r="1.4" fill="#35d6ff"/><circle cx="12" cy="19" r="1.2" fill="#ffb45c"/><circle cx="20" cy="19" r="1.2" fill="#ffb45c"/></svg>
+          <span class="brand-name">cajal</span>
+          <span class="brand-tag">brain simulation studio</span>
+        </a>
+        <!-- ships hidden and stays hidden while everything is connected: the
+             pill is for news (busy, off, partly up, failed), not for a
+             permanent "all good" in the corner of the eye. client.ts's
+             setStatus() reveals it. role=status so an error is announced when
+             it appears. -->
+        <span class="status-pill" id="status" data-state="ready" role="status" hidden title="which of the local services this page can reach"><span class="dot"></span><span id="status-text">connecting</span></span>
+      </div>
+    </header>
+
+    <slot />
+
+    <footer class="site-footer">
+      <p>
+        cajal is a simulation studio, not a clinical instrument. A run shows the kind of dynamics a cortex
+        has under a condition, on a <em>synthetic</em> connectome, never a measurement of anyone's brain.
+        Recordings are read by pre-trained models or their classical fallbacks, described and never
+        diagnosed. Everything runs on this machine.
+      </p>
+    </footer>
+  </body>
+</html>

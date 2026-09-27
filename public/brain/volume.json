@@ -1,0 +1,21 @@
+{
+  "source": "MNI152 T1 2 mm template (nilearn) cropped to the brain mask; labels from Harvard\u2013Oxford cort/sub maxprob-thr25-2mm mapped to the atlas, cerebellum from the mask",
+  "shape": [
+    73,
+    90,
+    78
+  ],
+  "origin_mm": [
+    -72.0,
+    -106.0,
+    -72.0
+  ],
+  "voxel_mm": 2.0,
+  "x_step_mm": 2.0,
+  "regions_labelled": 83,
+  "regions_missing": [
+    "L_parsorbitalis",
+    "R_parsorbitalis"
+  ],
+  "bytes": 1024942
+}

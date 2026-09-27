@@ -1,0 +1,165 @@
+---
+/**
+ * /how-it-works — the explainer behind the simulation at /.
+ *
+ * How a run is generated (the equations, as the engine steps them), how the
+ * signal reaches a scalp, how AI was used to BUILD the feature and where it
+ * works INSIDE it, and how to find your way around the repository. The
+ * prose is the scribe's, authored in the full studio (github.com/jhwadman/cajal,
+ * agents/briefs/explainer.md) and committed into src/lib/copy.ts; the
+ * equations and the directory table are hand-written here because they are
+ * the repo's own facts, checked against the code.
+ * Documentation, not a dashboard: no control on this page runs anything.
+ */
+import Base from '../layouts/Base.astro';
+import { EXPLAINER } from '../lib/copy.ts';
+
+const DIRS: Array<[string, string]> = [
+  ['service/engine/', 'the simulation engine: whole brain, connectome, atlas, analysis, presets, treatments, sweeps, microcircuit, single neuron. Pure TypeScript, no dependencies. Start here. The same files as the full studio\'s, so a run is the same numbers in both.'],
+  ['service/tests/', 'the regime tests that pin what every preset claims.'],
+  ['src/lib/', 'the page: sim.ts (the seam to the worker), gl.ts and render.ts (the brain), colormap.ts (the one activation scale), client.ts (the bench and this page).'],
+  ['src/lib/copy.ts', 'the prose, authored by the scribe in the full studio and checked against the code.'],
+  ['src/pages/', 'the two routes: index.astro, the simulation; how-it-works.astro, this page.'],
+  ['public/brain/', 'the baked brain: mesh.bin (the FreeSurfer fsaverage5 pial surface) and volume.bin (the MNI152 brain mask), built once in the full studio and committed.'],
+];
+const STUDIO = 'https://github.com/jhwadman/cajal';
+---
+
+<Base title="How it works" description={EXPLAINER.lead}>
+  <div class="standalone">
+    <div class="doc-layout">
+      <nav class="doc-toc" aria-label="contents">
+        <div class="label">contents</div>
+        <ol>
+          <li><a href="#run">The simulation</a></li>
+          <li><a href="#generate">How a run is generated</a></li>
+          <li><a href="#scalp">From regions to the scalp</a></li>
+          <li><a href="#built">How AI built it</a></li>
+          <li><a href="#inside">Where AI works inside it</a></li>
+          <li><a href="#repo">The repository</a></li>
+          <li><a href="#limits">Scope and limits</a></li>
+        </ol>
+        <p class="doc-foot toc-foot"><a href="/">The simulation</a> this page explains. The full studio, which adds the assistant, the EEG benchmark, the single neuron and the guided investigations, is <a href={STUDIO} target="_blank" rel="noopener">its own repository ↗</a>.</p>
+      </nav>
+
+      <article class="doc" id="explainer">
+        <header class="doc-head">
+          <h1>{EXPLAINER.title}</h1>
+          <p class="doc-lead">{EXPLAINER.lead}</p>
+        </header>
+
+        <!-- 01 · the run: the simulation page is the figure -->
+        <section id="run">
+          <h2>{EXPLAINER.run.title}</h2>
+          <p>{EXPLAINER.run.body}</p>
+          <p class="doc-foot"><a href="/" target="_blank" rel="noopener">Open the simulation ↗</a> in another tab and keep this page beside it.</p>
+        </section>
+
+        <!-- 02 · how a run is generated -->
+        <section id="generate">
+          <h2>{EXPLAINER.generate.title}</h2>
+          <p>{EXPLAINER.generate.body}</p>
+          <ol class="doc-steps">
+            {EXPLAINER.generate.steps.map((st) => (<li><b>{st.name}.</b> {st.body}</li>))}
+          </ol>
+          <h3>The equations, as the engine steps them</h3>
+          <pre class="equation">{`for every region i, every 0.5 ms, after a 400 ms warm-up that is never recorded:
+
+  net_i = Σ_j  w_ij · E_j(t − delay_ij)                 the connectome, delayed
+
+  x_E = c1·E_i − c2·I_i − k_adapt·A_i + P_i + G·net_i + stim_i + σ·ξ
+  x_I = c3·E_i − c4·I_i + Q + ½σ·ξ                      ξ: seeded Gaussian noise
+
+  E_i ← E_i + (dt/τ_E)·(−E_i + alive_i · S(x_E; a_E, θ_E))
+  I_i ← I_i + (dt/τ_I)·(−I_i + alive_i · S(x_I; a_I, θ_I))
+  A_i ← A_i + (dt/τ_A)·(−A_i + E_i)                     slow adaptation
+
+  S(x; a, θ) = 1 / (1 + e^(−a(x−θ)))  −  1 / (1 + e^(aθ))   the response curve
+  alive_i = 1 − lesion severity (1 intact, 0 destroyed)
+
+the six knobs become the parameters (every knob 1 = the awake baseline):
+
+  c1 = 16 · excitability · (1.1 − 0.1·ACh)         c2 = 12 · inhibition · (0.95 + 0.05·DA)
+  P  = 1.25 · excitability · (0.6 + 0.4·arousal) · (0.9 + 0.1·NA) · (1.1 − 0.1·ADO)
+  G  = 2.5 · coupling · (1.15 − 0.15·5HT)          σ = 0.45 · noise · (0.9 + 0.1·NA)(0.85 + 0.15·5HT)(1.1 − 0.1·DA)
+  k_adapt = 2.6 · adaptation · (0.7 + 0.3·ADO) · (1.2 − 0.2·ACh) · (1.3 − 0.3·min(arousal, 1))
+  a_E = 1.3 · (0.85 + 0.15·DA)   a_I = 2   c3 = 15   c4 = 3   Q = 0
+  τ_E = 8 ms   τ_I = 9 ms   τ_A = 300 ms   θ_E = 4   θ_I = 3.7
+
+  ACh, DA, NA, 5HT, ADO: the five modulators, each 1 at baseline
+  a treatment multiplies these parameters last; a preset's overrides replace them
+
+E is sampled every 4 ms (250 Hz) into the frames the brain plays back.
+The readout is computed from those frames: the mean field (E averaged over
+regions), its RMS amplitude, synchrony = var(mean field) / mean var(E_i),
+and a Hann-windowed FFT of the mean field split into delta, theta, alpha,
+beta and gamma.`}</pre>
+          <p class="doc-foot">The letter of this is <code>service/engine/wholeBrain.ts</code> (the loop and <code>derive()</code>) and <code>service/engine/analysis.ts</code> (the readout). Where this page and that file disagree, the file is right.</p>
+        </section>
+
+        <!-- 03 · the scalp -->
+        <section id="scalp">
+          <h2>{EXPLAINER.scalp.title}</h2>
+          <p>{EXPLAINER.scalp.body}</p>
+          <dl class="keyed">
+            <dt>what it keeps</dt><dd>rhythm, amplitude and synchrony — the three things the benchmark turns on.</dd>
+            <dt>what it is not</dt><dd>a lead field. There is no head model, no skull and no source orientation; every electrode is a distance-weighted sum of the cortical regions under it.</dd>
+            <dt>where it runs</dt><dd>in the Python service (<code>models/cajal_models/synth.py</code>), not in this page. The projection is deterministic under its seed, like the run it reads.</dd>
+          </dl>
+        </section>
+
+        <!-- 04 · how AI built it -->
+        <section id="built">
+          <h2>{EXPLAINER.built.title}</h2>
+          <p>{EXPLAINER.built.body}</p>
+          <ol class="doc-steps">
+            {EXPLAINER.built.stages.map((st) => (<li><b>{st.name}.</b> {st.body}</li>))}
+          </ol>
+        </section>
+
+        <!-- 05 · where AI works inside it -->
+        <section id="inside">
+          <h2>{EXPLAINER.inside.title}</h2>
+          <p>{EXPLAINER.inside.body}</p>
+          <dl class="doc-sections">
+            {EXPLAINER.inside.places.map((pl) => (
+              <div><dt><span class="badge ai">AI</span> {pl.name}</dt><dd>{pl.body}</dd></div>
+            ))}
+          </dl>
+          <h3>The three rules it works under</h3>
+          <dl class="keyed">
+            <dt>never a measurement</dt><dd>a simulation is never presented as a measurement of anyone's brain, and a recording is described, never diagnosed.</dd>
+            <dt>grounded in the run</dt><dd>every number the assistant quotes comes from a tool result in that turn; if it was not run, it is not known.</dd>
+            <dt>provenance on every panel</dt><dd>every panel in the studio carries a badge saying whether it is mathematics or AI, and a fallback never looks like the model it stood in for.</dd>
+          </dl>
+        </section>
+
+        <!-- 06 · the repository -->
+        <section id="repo">
+          <h2>{EXPLAINER.repo.title}</h2>
+          <p>{EXPLAINER.repo.body}</p>
+          <ol class="doc-steps">
+            {EXPLAINER.repo.steps.map((st) => (<li><b>{st.name}.</b> {st.body}</li>))}
+          </ol>
+          <h3>Where things are</h3>
+          <dl class="doc-sections dirs">
+            {DIRS.map(([path, what]) => (<div><dt><code>{path}</code></dt><dd>{what}</dd></div>))}
+          </dl>
+          <h3>Running it</h3>
+          <pre class="equation">{`npm install && npm run dev        # the page, port 4360: the simulation and this route, no keys needed
+npm test                           # the engine's regime tests
+npm run build                      # static files under dist/, which is what this site is
+
+# the assistant, the recordings and the benchmark are the full studio's, and need its local services`}</pre>
+        </section>
+
+        <!-- 07 · limits -->
+        <section id="limits">
+          <h2>Scope and limits</h2>
+          <p>{EXPLAINER.honesty}</p>
+          <p class="doc-foot">Every word this page uses is defined on the Glossary of <a href={STUDIO} target="_blank" rel="noopener">the full studio ↗</a>.</p>
+        </section>
+      </article>
+    </div>
+  </div>
+</Base>
