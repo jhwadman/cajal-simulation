@@ -2334,7 +2334,10 @@ export function start(): void {
   const investigations: Investigations = startInvestigations(investigationHost);
 
   function switchTab(t: Tab): void {
-    if (standalone && t !== 'sim') { window.location.href = `/#${t}`; return; }
+    // This site is the Simulation tab alone: there is no other tab to go to,
+    // so a goto lands on the explainer — the About statement (never a
+    // measurement) is its Scope and limits. The full studio goes to /#tab.
+    if (standalone && t !== 'sim') { window.location.href = t === 'about' ? '/how-it-works#limits' : '/how-it-works'; return; }
     activeTab = t;
     for (const b of root.querySelectorAll<HTMLButtonElement>('[data-tab]')) {
       const on = b.dataset.tab === t;
