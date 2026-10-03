@@ -1,5 +1,5 @@
 {
-  "source": "fsaverage6 pial surfaces + sulcal depth (FreeSurfer, via nilearn); MNI152 2 mm brain mask, marching cubes, for cerebellum and brainstem",
+  "source": "fsaverage6 pial surfaces (Taubin-smoothed x8) + sulcal depth (FreeSurfer, via nilearn; painted as occlusion 0.36 at power 1.6); MNI152 2 mm brain mask, marching cubes, for cerebellum and brainstem",
   "vertices": 89690,
   "faces": 179356,
   "parts": {
@@ -19,16 +19,16 @@
   },
   "bounds": {
     "x": [
-      -68.81330108642578,
-      69.84645080566406
+      -68.88357897517837,
+      69.90530153488358
     ],
     "y": [
-      -104.6920166015625,
-      69.51591491699219
+      -104.65563413331095,
+      69.53319269774455
     ],
     "z": [
       -71.28120695050605,
-      79.23396301269531
+      79.26175459291507
     ]
   }
 }

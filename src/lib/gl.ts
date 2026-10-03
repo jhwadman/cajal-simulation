@@ -129,8 +129,11 @@ void main() {
   float facing = max(0.0, n.z);
   float rim = pow(1.0 - facing, 3.0) * 0.14;
   float depthFade = 0.7 + 0.3 * clamp((vDepth + 80.0) / 160.0, 0.0, 1.0);
-  // irradiance on the tissue, in colour; the occlusion darkens the sulci
-  vec3 irr = (C_SKY * (0.10 + 0.10 * sky) + C_KEY * (0.78 * key) + C_FILL * (0.22 * fill) + C_BACK * (0.18 * back)) * vOcc + rim;
+  // irradiance on the tissue, in colour; the baked occlusion darkens the
+  // direct light in the sulci fully and the ambient only by half — a fold
+  // still receives the sky, which is what keeps a crease from reading as a cut
+  float occAmb = 0.5 + 0.5 * vOcc;
+  vec3 irr = C_SKY * (0.10 + 0.10 * sky) * occAmb + (C_KEY * (0.78 * key) + C_FILL * (0.22 * fill) + C_BACK * (0.18 * back)) * vOcc + rim;
   irr *= depthFade * ${glf(EXPOSURE)};
   vec3 shade3 = aces3(irr);
   float shade = aces(dot(irr, vec3(0.3333)));
