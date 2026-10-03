@@ -71,23 +71,80 @@ const el = (tag: string, cls?: string, text?: string): HTMLElement => {
   return e;
 };
 /**
- * One frame — or a timer, if no frame is coming.
- *
- * Every point of a sweep waits here so the chart can be painted between
- * simulations. A browser gives a BACKGROUND tab no animation frames at all,
- * so a reader who starts a sweep and switches tabs used to come back to an
- * experiment frozen on point one, waiting on a callback that would never
- * run. The timer loses the race on a visible tab (a frame arrives in ~16 ms)
- * and wins on a hidden one, so the sweep finishes either way.
+ * How long to let a frame be late before concluding that this page is not
+ * painting at all. Generous: a stage drawing a whole brain can be slow and
+ * still be worth waiting for.
  */
-const frame = () =>
-  new Promise<void>((r) => {
-    const t = setTimeout(() => r(), 32);
-    requestAnimationFrame(() => {
-      clearTimeout(t);
-      r();
+const FRAME_BACKSTOP_MS = 400;
+/** a new regime is worth looking at, so it is held rather than flashed */
+const REGIME_DWELL_MS = 260;
+
+/**
+ * A sweep's sense of whether anyone is actually watching it draw.
+ *
+ * WHY THIS IS NOT `requestAnimationFrame`. A frame is not a timer: it arrives
+ * only if the page is painting. Chrome stops rAF outright for a hidden page —
+ * measured here as zero callbacks in eight seconds — and stretches it to the
+ * cost of the slowest frame while the brain stage animates the previous run.
+ * Awaiting one per point made a sweep's wall clock a property of the
+ * compositor rather than of the work: of an 87.7 s nine-point dose sweep,
+ * 85.9 s was spent waiting for frames and 1.7 s inside the model.
+ *
+ * So the sweep asks the page instead of assuming. While frames come back it
+ * waits for them, and the chart gains a point per frame exactly as before.
+ * The first frame that never arrives settles the question for the rest of the
+ * sweep: nobody is watching, so stop paying to be watched. A reader who looks
+ * away gets a finished curve when they look back, instead of a sweep that
+ * stopped when the painting stopped.
+ *
+ * A timer cannot carry this on its own — a background tab clamps `setTimeout`
+ * to one second, so a per-point deadline would cost as much as the frame it
+ * was meant to replace. It is used once, to find out, and then not again.
+ */
+function paintPacer() {
+  let painting = true;
+
+  /** yield without waiting for anything: the page is not going to paint */
+  const task = (): Promise<boolean> =>
+    // not a timer, so a background tab does not clamp it to a second; the
+    // relay and the controls still get their turn between points
+    new Promise((r) => {
+      const ch = new MessageChannel();
+      ch.port1.onmessage = () => r(false);
+      ch.port2.postMessage(0);
     });
-  });
+
+  /** hand the browser one chance to paint; true if it took it */
+  async function handOver(): Promise<boolean> {
+    if (!painting || document.visibilityState === 'hidden') return task();
+    const painted = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cancelAnimationFrame(raf);
+        resolve(ok);
+      };
+      const raf = requestAnimationFrame(() => done(true));
+      const timer = setTimeout(() => done(false), FRAME_BACKSTOP_MS);
+    });
+    if (!painted) painting = false;
+    return painted;
+  }
+
+  /**
+   * Hold for `ms` so a change on the brain can register as a change — but
+   * count only time the page actually spent painting. The moment frames stop
+   * coming there is nothing to look at, and the hold ends.
+   */
+  async function dwell(ms: number): Promise<void> {
+    const until = performance.now() + ms;
+    while (performance.now() < until) if (!(await handOver())) return;
+  }
+
+  return { handOver, dwell };
+}
 const COL = { primary: '#35d6ff', secondary: '#ff6a3d', warm: '#ffb45c' };
 
 /** which regime a point is in: the brain is redrawn when this changes */
@@ -676,6 +733,7 @@ export function startInvestigations(host: InvestigationHost): Investigations {
        one at a time. `spent.compute` is no longer this thread's cost — the
        model runs while the chart below is being drawn — so it is measured as
        the wait for the next point, which is what a reader waits for. */
+    const pace = paintPacer();
     let waiting = performance.now();
     const sweep = await sweepBrain(spec as never, async (step) => {
       spent.compute += performance.now() - waiting;
@@ -690,14 +748,16 @@ export function startInvestigations(host: InvestigationHost): Investigations {
       // Redrawing the whole brain costs far more than simulating a point, and
       // eleven near-identical brains teach nothing. Redraw when the system
       // actually changes regime, which is the moment worth looking at.
-      if (regime !== lastRegime || step.index === step.total - 1) {
+      const changed = regime !== lastRegime;
+      if (changed || step.index === step.total - 1) {
         lastRegime = regime;
         t = performance.now();
         host.showBrainRun(step.run, step.summary, `${opts.title} · ${opts.xLabel} = ${step.point.value} · ${regime}`);
         spent.brain += performance.now() - t;
       }
       t = performance.now();
-      await frame();
+      // a new regime is held so it can be seen; frames only while painting
+      if ((await pace.handOver()) && changed) await pace.dwell(REGIME_DWELL_MS);
       spent.frame += performance.now() - t;
       waiting = performance.now();
     });
@@ -933,10 +993,11 @@ export function startInvestigations(host: InvestigationHost): Investigations {
       const xs = sweep.points.map((p) => p.value);
       const series = seriesFor(sweep);
       // fast to compute, so reveal it point by point: the shape is the finding
+      const pace = paintPacer();
       for (let i = 1; i <= xs.length; i++) {
         drawSweepChart(built.canvas, { xs, series, xLabel: X, yLabel: 'firing rate (Hz)', filled: i });
         setStatus(built.status, `Point ${i} of ${xs.length}.`, `K⁺ ${xs[i - 1]} mM · rest ${sweep.points[i - 1]!.rest_mv.toFixed(0)} mV · ${sweep.points[i - 1]!.rate_hz.toFixed(0)} Hz`);
-        await frame();
+        await pace.handOver();
       }
       drawFinished(sweep);
       setStatus(

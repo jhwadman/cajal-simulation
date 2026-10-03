@@ -1,9 +1,10 @@
 /**
  * src/lib/surface.ts — the brain mesh the view renders, loaded from real
  * anatomy: public/brain/mesh.bin, baked by models/scripts/build_brain_mesh.py
- * from the FreeSurfer fsaverage5 pial surface (real gyri, measured sulcal
- * depth) and the MNI152 brain mask (cerebellum, brainstem). Same origin,
- * ~700 KB, fetched once.
+ * from the FreeSurfer fsaverage6 pial surface (real gyri at 40,962 vertices
+ * a hemisphere, measured sulcal depth) and the MNI152 brain mask
+ * (cerebellum, brainstem). Same origin, ~3.2 MB (1.6 MB compressed), fetched
+ * once.
  *
  * Each vertex carries a position, a smoothed normal, an occlusion value and
  * a part tag; the region weights (which atlas regions colour the vertex) are

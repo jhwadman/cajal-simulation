@@ -179,7 +179,7 @@ export function start(): void {
   const statusText = $('status-text');
 
   const regions: RegionLite[] = REGIONS.map((r) => ({ ...r }));
-  // the real brain mesh (fsaverage5 + MNI152), same origin, once; WebGL draws it under the overlay
+  // the real brain mesh (fsaverage6 + MNI152), same origin, once; WebGL draws it under the overlay
   const glCanvas = $<HTMLCanvasElement>('brain-gl');
   let brainGL: BrainGL | null = null;
   let brainMesh: BrainMesh | null = null;
@@ -193,6 +193,10 @@ export function start(): void {
     .catch((err) => console.warn('brain mesh not loaded:', err));
   const edges: EdgeLite[] = connectome().edges.slice(0, 260);
   const view: View = { yaw: Math.PI + 0.35, pitch: 0.32, auto: true, zoom: 1 };
+  /** yaw carried past pointer-up, rad/ms: a flick keeps the brain turning and damping brings it to rest */
+  let spin = 0;
+  /** when a drag interrupted the orbit, the wall time at which it resumes; 0 = it does not */
+  let resumeAt = 0;
   const marks: Marks = { stimulated: new Set(), lesioned: new Set(), masked: new Set() };
 
   let run: Run | null = null;
@@ -963,6 +967,18 @@ export function start(): void {
     const dtWall = lastT ? Math.min(100, t - lastT) : 16;
     lastT = t;
     if (view.auto && mode !== 'slice') view.yaw += dtWall * 0.00012;
+    // inertia after a flick: the same 8% damping per frame OrbitControls uses
+    if (spin !== 0 && !drag) {
+      view.yaw += spin * dtWall;
+      spin *= Math.pow(0.92, dtWall / 16);
+      if (Math.abs(spin) < 0.000005) spin = 0;
+    }
+    // a drag pauses the orbit rather than ending it: it resumes after a rest
+    if (resumeAt && !drag && spin === 0 && t >= resumeAt) {
+      resumeAt = 0;
+      view.auto = true;
+      $('view-orbit').setAttribute('aria-pressed', 'true');
+    }
     if (playing && frames) {
       const speed = Number(speedSel.value);
       frame += (dtWall * speed) / frames.dt;
@@ -1002,6 +1018,8 @@ export function start(): void {
     view.yaw = yaw;
     view.pitch = pitch;
     view.auto = auto;
+    spin = 0;
+    resumeAt = 0;
   };
   const setMode = (m: 'organ' | 'depth' | 'slice') => {
     mode = m;
@@ -1065,15 +1083,25 @@ export function start(): void {
   $('view-dorsal').addEventListener('click', () => setView('view-dorsal', -Math.PI / 2, 1.45, false));
   $('view-front').addEventListener('click', () => setView('view-front', Math.PI / 2, 0.1, false));
 
-  let drag: { x: number; y: number; yaw: number; pitch: number } | null = null;
+  let drag: { x: number; y: number; yaw: number; pitch: number; wasAuto: boolean; t: number; lastYaw: number } | null = null;
   brain.addEventListener('pointerdown', (e) => {
-    drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch };
+    drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, wasAuto: view.auto || resumeAt > 0, t: e.timeStamp, lastYaw: view.yaw };
+    spin = 0;
+    resumeAt = 0;
     brain.setPointerCapture(e.pointerId);
   });
   brain.addEventListener('pointermove', (e) => {
     if (drag) {
       view.yaw = drag.yaw + (e.clientX - drag.x) * 0.008;
       view.pitch = Math.max(-1.4, Math.min(1.5, drag.pitch + (e.clientY - drag.y) * 0.008));
+      // the hand's speed, smoothed over the last few events, becomes the flick
+      const dt = e.timeStamp - drag.t;
+      if (dt > 0) {
+        const v = (view.yaw - drag.lastYaw) / dt;
+        spin = spin === 0 ? v : spin * 0.6 + v * 0.4;
+        drag.t = e.timeStamp;
+        drag.lastYaw = view.yaw;
+      }
       view.auto = false;
       for (const b of ['view-orbit', 'view-lateral', 'view-dorsal', 'view-front']) $(b).setAttribute('aria-pressed', 'false');
       return;
@@ -1107,11 +1135,18 @@ export function start(): void {
       hv.textContent = `${r.label}${a ? ` · ${(a[hover] ?? 0).toFixed(2)}` : ''}${stat ? ` · mean ${stat.mean.toFixed(2)} · ${stat.peakHz.toFixed(1)} Hz` : ''}`;
     } else hv.textContent = '';
   });
-  brain.addEventListener('pointerup', () => { drag = null; });
+  brain.addEventListener('pointerup', (e) => {
+    if (!drag) return;
+    // a hand that stopped before letting go leaves no flick; one that was
+    // orbiting before the drag goes back to it after a rest
+    if (e.timeStamp - drag.t > 80 || Math.abs(spin) < 0.00002) spin = 0;
+    if (drag.wasAuto) resumeAt = e.timeStamp + 2400;
+    drag = null;
+  });
   // touch-action is pan-y on the canvas: a vertical swipe scrolls the page
   // and the browser cancels the pointer, so the drag must let go here too
-  brain.addEventListener('pointercancel', () => { drag = null; });
-  brain.addEventListener('pointerleave', () => { drag = null; hover = -1; hoverLobe = -1; $('hover').textContent = ''; });
+  brain.addEventListener('pointercancel', () => { drag = null; spin = 0; });
+  brain.addEventListener('pointerleave', () => { drag = null; spin = 0; hover = -1; hoverLobe = -1; $('hover').textContent = ''; });
 
   playBtn.addEventListener('click', () => {
     playing = !playing;

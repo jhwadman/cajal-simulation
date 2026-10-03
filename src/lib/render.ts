@@ -41,12 +41,34 @@ export interface View {
   inset?: { top: number; bottom: number };
 }
 
-/** the shared fit: px per mm and the vertical centre, honouring the inset */
+/**
+ * The offset that centres the mesh on the origin, mm, added to every MNI
+ * coordinate before the view rotates it (the atlas regions in the overlay,
+ * the vertices in the shader, the floor). public/brain/meta.json bounds:
+ * y −104.7…69.2, z −71.3…79.2, so the midpoints are y −17.8 and z +4.
+ */
+export const MESH_OFFSET = { x: 0, y: 18, z: -4 } as const;
+/** the brain's half-extents about MESH_OFFSET, mm, from the same bounds */
+const HALF = { x: 70, y: 88, z: 76 } as const;
+/** room for the perspective term (near points scale up to ~1.17) */
+const FIT_MARGIN = 1.04;
+
+/**
+ * The shared fit: px per mm and the vertical centre, honouring the inset.
+ * The brain is fitted to the band by what it PROJECTS to at this pitch, so
+ * its base clears the legend and its crown the head-up display in every
+ * view — a side view uses its height, a top view its length. The width is
+ * the worst case over yaw rather than the current one, so the auto-orbit
+ * does not breathe.
+ */
 export function fitView(w: number, h: number, view: View): { s: number; cy: number } {
   const top = view.inset?.top ?? 0;
   const bottom = view.inset?.bottom ?? 0;
   const hh = Math.max(40, h - top - bottom);
-  return { s: Math.min(w / 215, hh / 150) * (view.zoom ?? 1), cy: top + hh / 2 };
+  const footprint = Math.hypot(HALF.x, HALF.y); // the box's reach in the horizontal plane, any yaw
+  const halfW = footprint * FIT_MARGIN;
+  const halfH = (Math.abs(Math.sin(view.pitch)) * footprint + Math.cos(view.pitch) * HALF.z) * FIT_MARGIN;
+  return { s: Math.min(w / (2 * halfW), hh / (2 * halfH)) * (view.zoom ?? 1), cy: top + hh / 2 };
 }
 
 export interface Marks {
@@ -106,9 +128,9 @@ function basis(view: View): { rx: [number, number, number]; ry: [number, number,
 }
 
 function project(px: number, py: number, pz: number, b: ReturnType<typeof basis>, cx: number, cy: number, s: number): Projected {
-  const X = px;
-  const Y = py + 18;
-  const Z = pz - 12;
+  const X = px + MESH_OFFSET.x;
+  const Y = py + MESH_OFFSET.y;
+  const Z = pz + MESH_OFFSET.z;
   const sx = X * b.rx[0] + Y * b.rx[1] + Z * b.rx[2];
   const sy = X * b.ry[0] + Y * b.ry[1] + Z * b.ry[2];
   const depth = X * b.rd[0] + Y * b.rd[1] + Z * b.rd[2];

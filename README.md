@@ -5,7 +5,7 @@ simulation studio, as a site of its own: one page, no services, no keys.
 
 An 85-region Wilson–Cowan whole-brain model on a synthetic distance-rule
 connectome with conduction delays and adaptation, run **in your browser** on a
-worker thread and drawn on a real brain (the FreeSurfer fsaverage5 pial
+worker thread and drawn on a real brain (the FreeSurfer fsaverage6 pial
 surface, the MNI152 brain mask). Pick a named state — awake, deep sleep, REM,
 seizure, anaesthesia, a lesion, a stimulation — or a treatment, press *run
 the brain*, and watch the cortex light up by region while the mean field, the
