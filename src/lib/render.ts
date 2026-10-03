@@ -291,14 +291,36 @@ export function drawBrain(canvas: HTMLCanvasElement, f: BrainFrame): Projected[]
     }
   }
 
-  // orientation marks
-  if (f.orientation === false) return pos;
-  ctx.fillStyle = 'rgba(154,164,178,0.7)';
+  // orientation marks. Each word sits at the edge of the fitted band along
+  // its axis's screen direction — never on the brain, which the fit keeps
+  // inside the band — and fades as the axis turns toward the viewer, because
+  // a face has no edge to label. Zoomed in, the brain owns the band and the
+  // words go. (They used to be 3D points in front of and above the brain,
+  // which the front and orbit views projected onto the cortex.)
+  if (f.orientation === false || (f.view.zoom ?? 1) > 1.05) return pos;
+  const bandTop = f.view.inset?.top ?? 0;
+  const bandH = Math.max(40, h - bandTop - (f.view.inset?.bottom ?? 0));
   ctx.font = '11px ui-monospace, Menlo, monospace';
-  const front = project(0, 100, 10, b, cx, cy, s);
-  const top = project(0, -18, 84, b, cx, cy, s);
-  ctx.fillText('anterior', front.x - 22, front.y);
-  ctx.fillText('superior', top.x - 22, top.y - 4);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const mark = (label: string, ax: [number, number, number]) => {
+    const dx = ax[0] * b.rx[0] + ax[1] * b.rx[1] + ax[2] * b.rx[2];
+    const dy = -(ax[0] * b.ry[0] + ax[1] * b.ry[1] + ax[2] * b.ry[2]);
+    const len = Math.hypot(dx, dy);
+    const alpha = Math.min(1, Math.max(0, (len - 0.25) / 0.35));
+    if (alpha <= 0) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const tx = Math.abs(ux) > 1e-6 ? (w / 2 - 34) / Math.abs(ux) : Infinity;
+    const ty = Math.abs(uy) > 1e-6 ? (bandH / 2 - 9) / Math.abs(uy) : Infinity;
+    const t = Math.min(tx, ty);
+    ctx.fillStyle = `rgba(154,164,178,${(0.7 * alpha).toFixed(3)})`;
+    ctx.fillText(label, cx + ux * t, cy + uy * t);
+  };
+  mark('anterior', [0, 1, 0]);
+  mark('superior', [0, 0, 1]);
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
   return pos;
 }
 
