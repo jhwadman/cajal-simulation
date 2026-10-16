@@ -1,32 +1,31 @@
-# cajal-simulation
+# Whole Brain Simulation
 
-The simulation from [cajal](https://github.com/jhwadman/cajal), a brain
-simulation studio, as a site of its own: one page, no services, no keys.
+An offline desktop teaching app for exploring an 85-region Wilson–Cowan
+whole-brain model on a synthetic connectome. Pick a brain state, adjust its
+controls, and inspect the visualization and numerical readout. The app
+bundles its runtime, brain assets, fonts, and explanation pages.
 
-An 85-region Wilson–Cowan whole-brain model on a synthetic distance-rule
-connectome with conduction delays and adaptation, run **in your browser** on a
-worker thread and drawn on a real brain (the FreeSurfer fsaverage6 pial
-surface, the MNI152 brain mask). Pick a named state — awake, deep sleep, REM,
-seizure, anaesthesia, a lesion, a stimulation — or a treatment, press *run
-the brain*, and watch the cortex light up by region while the mean field, the
-synchrony and the band split are read out beside it. `/how-it-works` says how
-a run is generated, equation by equation, and where AI was used to build it.
+## Build and run
 
-The page makes no request once it has loaded. Everything it shows is
-computed by `service/engine/`, pure TypeScript with no dependencies, which is
-the same engine the full studio's agent runs through its tools: a run is the
-same numbers wherever it is made.
-
-## Run it
+Use Node 22.16+ or Node 24 LTS. From this directory:
 
 ```bash
-npm install
-npm run dev      # http://127.0.0.1:4360
-npm test         # the engine's regime tests: every preset behaves as it claims
-npm run build    # static files under dist/
+npm ci
+npm run desktop
+npm test
+npm run test:desktop
+npm run test:app
+npm run package
 ```
 
-Node 22 or newer.
+Setup downloads dependencies; the installed app runs offline. The packaging
+command creates a DMG/ZIP on Mac, an NSIS installer on Windows, or an AppImage
+on Linux under `release/`. Installed-app users do not need Node or a terminal.
+See [desktop/README.md](desktop/README.md) for the native build workflow,
+installed-app verification, and signing requirements for public releases.
+
+The engine is pure TypeScript with no runtime dependencies. Desktop packaging
+uses Electron and preserves the existing worker and deterministic tests.
 
 ## Where things are
 
@@ -42,8 +41,7 @@ Node 22 or newer.
 The full studio adds an assistant that runs the model through a tool set,
 pre-trained models that read EEG, fMRI, single-cell and imaging data, an EEG
 benchmark, a single neuron and four guided investigations. It lives in
-[jhwadman/cajal](https://github.com/jhwadman/cajal); this repository is a
-copy of the pages and the engine, kept in step by hand.
+[jhwadman/cajal](https://github.com/jhwadman/cajal); this repository packages the simulation as a standalone desktop app.
 
 cajal is a simulation studio, not a clinical instrument. A run shows the kind
 of dynamics a cortex has under a condition, on a synthetic connectome, never

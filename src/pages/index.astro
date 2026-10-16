@@ -18,7 +18,7 @@ import Base from '../layouts/Base.astro';
 import Studio from '../components/Studio.astro';
 import { EXPLAINER } from '../lib/copy.ts';
 
-const relay = String(import.meta.env.CAJAL_RELAY ?? '').replace(/\/$/, '');
+const relay = ''; // The standalone app always runs offline; never embed a local .env relay.
 if (relay && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(relay)) {
   throw new Error(`CAJAL_RELAY must be a loopback http origin (got ${relay}): the relay holds keys and must never be reached across a network`);
 }
