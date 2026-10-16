@@ -15,6 +15,7 @@ import Base from '../layouts/Base.astro';
 import { EXPLAINER } from '../lib/copy.ts';
 
 const DIRS: Array<[string, string]> = [
+  ['desktop/', 'the offline Electron shell, bundle path checks, and desktop smoke test.'],
   ['service/engine/', 'the simulation engine: whole brain, connectome, atlas, analysis, presets, treatments, sweeps, microcircuit, single neuron. Pure TypeScript, no dependencies. Start here. The same files as the full studio\'s, so a run is the same numbers in both.'],
   ['service/tests/', 'the regime tests that pin what every preset claims.'],
   ['src/lib/', 'the page: sim.ts (the seam to the worker), gl.ts and render.ts (the brain), colormap.ts (the one activation scale), client.ts (the bench and this page).'],
@@ -35,7 +36,7 @@ const STUDIO = 'https://github.com/jhwadman/cajal';
           <li><a href="#generate">How a run is generated</a></li>
           <li><a href="#scalp">From regions to the scalp</a></li>
           <li><a href="#built">How AI built it</a></li>
-          <li><a href="#inside">Where AI works inside it</a></li>
+          <li><a href="#inside">AI in the full studio</a></li>
           <li><a href="#repo">The repository</a></li>
           <li><a href="#limits">Scope and limits</a></li>
         </ol>
@@ -52,7 +53,7 @@ const STUDIO = 'https://github.com/jhwadman/cajal';
         <section id="run">
           <h2>{EXPLAINER.run.title}</h2>
           <p>{EXPLAINER.run.body}</p>
-          <p class="doc-foot"><a href="/" target="_blank" rel="noopener">Open the simulation ↗</a> in another tab and keep this page beside it.</p>
+          <p class="doc-foot"><a href="/" target="_blank" rel="noopener">Open the simulation ↗</a> in another app window and keep this page beside it.</p>
         </section>
 
         <!-- 02 · how a run is generated -->
@@ -146,9 +147,9 @@ beta and gamma.`}</pre>
             {DIRS.map(([path, what]) => (<div><dt><code>{path}</code></dt><dd>{what}</dd></div>))}
           </dl>
           <h3>Running it</h3>
-          <pre class="equation">{`npm install && npm run dev        # the page, port 4360: the simulation and this route, no keys needed
+          <pre class="equation">{`npm ci && npm run desktop         # build and open the desktop app
 npm test                           # the engine's regime tests
-npm run build                      # static files under dist/, which is what this site is
+npm run package                    # an installer under release/
 
 # the assistant, the recordings and the benchmark are the full studio's, and need its local services`}</pre>
         </section>

@@ -1,0 +1,32 @@
+import { _electron as electron, expect } from '@playwright/test';
+import path from 'node:path';
+import os from 'node:os';
+const packaged = process.env.BRAIN_EXECUTABLE;
+const app = await electron.launch(packaged ? { executablePath: packaged, args: ['--enable-unsafe-swiftshader'] } : { args: [path.resolve('.'), '--enable-unsafe-swiftshader'] });
+try {
+  const page = await app.firstWindow();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page.locator('#bench-brain')).toBeVisible();
+  const workers = page.workers();
+  await page.locator('#preset').selectOption('awake');
+  await page.locator('#bench-brain').click();
+  await expect(page.locator('#summary li').filter({ hasText: 'synchrony:' })).toContainText('0.02', { timeout: 30000 });
+  const awake = await page.locator('#summary').innerText();
+  await page.locator('#preset').selectOption('seizure');
+  await page.locator('#bench-brain').click();
+  await expect(page.locator('#summary li').filter({ hasText: 'synchrony:' })).toContainText('0.96', { timeout: 30000 });
+  const seizure = await page.locator('#summary').innerText();
+  expect(await page.evaluate(() => typeof window.require)).toBe('undefined');
+  expect(await page.evaluate(async () => { try { await fetch('https://example.com'); return false; } catch { return true; } })).toBe(true);
+  const helpPromise = app.waitForEvent('window');
+  await page.getByRole('link', { name: 'how it works' }).click();
+  const help = await helpPromise;
+  await expect(help.locator('h1')).toContainText('Whole-brain');
+  await expect(help.locator('#run')).toContainText('Wilson');
+  await page.screenshot({ path: path.join(os.tmpdir(), 'whole-brain-desktop-smoke.png') });
+  expect(errors).toEqual([]);
+  expect(page.workers().length).toBeGreaterThan(0);
+  console.log(JSON.stringify({ awake, seizure, workerCount: page.workers().length, errors, packaged: !!packaged }, null, 2));
+} finally { await app.close(); }

@@ -15,10 +15,10 @@ interface Props {
   description?: string;
 }
 
-const SITE = 'cajal';
+const SITE = 'Whole Brain Simulation';
 const {
   title,
-  description = 'A brain simulation studio: a Melchizedek agent drives a whole-brain neural-mass model, a spiking microcircuit and pre-trained neuroscience models, and the page draws what they did.',
+  description = 'An offline desktop application for exploring a whole-brain neural-mass model on a synthetic connectome.',
 } = Astro.props;
 const pageTitle = title ? `${title} · ${SITE}` : SITE;
 ---
@@ -38,10 +38,10 @@ const pageTitle = title ? `${title} · ${SITE}` : SITE;
   <body>
     <header class="site-header">
       <div class="header-inner">
-        <a href="/" class="brand" aria-label="cajal — home">
+        <a href="/" class="brand" aria-label="Whole Brain Simulation — home">
           <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0c1017"/><g fill="none" stroke="#35d6ff" stroke-width="1.6" stroke-linecap="round"><path d="M10 22c-3-2-4-6-2-9s5-5 8-5 6 1 8 4 1 7-2 9"/><path d="M16 8v16M10 14h12M12 19h8"/></g><circle cx="16" cy="14" r="2.4" fill="#fff"/><circle cx="10" cy="14" r="1.4" fill="#35d6ff"/><circle cx="22" cy="14" r="1.4" fill="#35d6ff"/><circle cx="12" cy="19" r="1.2" fill="#ffb45c"/><circle cx="20" cy="19" r="1.2" fill="#ffb45c"/></svg>
-          <span class="brand-name">cajal</span>
-          <span class="brand-tag">brain simulation studio</span>
+          <span class="brand-name">Whole Brain Simulation</span>
+          <span class="brand-tag">offline desktop lab</span>
         </a>
         <!-- ships hidden and stays hidden while everything is connected: the
              pill is for news (busy, off, partly up, failed), not for a
@@ -56,10 +56,9 @@ const pageTitle = title ? `${title} · ${SITE}` : SITE;
 
     <footer class="site-footer">
       <p>
-        cajal is a simulation studio, not a clinical instrument. A run shows the kind of dynamics a cortex
+        Whole Brain Simulation is a teaching model, not a clinical instrument. A run shows the kind of dynamics a cortex
         has under a condition, on a <em>synthetic</em> connectome, never a measurement of anyone's brain.
-        Recordings are read by pre-trained models or their classical fallbacks, described and never
-        diagnosed. Everything runs on this machine.
+        Everything runs on this machine.
       </p>
     </footer>
   </body>

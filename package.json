@@ -1,24 +1,67 @@
 {
   "name": "cajal-simulation",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "cajal, the simulation alone: a whole-brain neural-mass model on a synthetic connectome, run and drawn entirely in the browser.",
+  "description": "Whole Brain Simulation: an offline desktop teaching app.",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "^22.16.0 || >=24.0.0"
   },
   "scripts": {
     "dev": "astro dev --port 4360",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test service/tests/*.test.ts"
-  },
-  "dependencies": {
-    "astro": "^5.0.0"
+    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test service/tests/*.test.ts",
+    "desktop": "npm run build && electron .",
+    "package": "npm run build && electron-builder --publish never",
+    "package:mac": "npm run build && electron-builder --mac --publish never",
+    "package:win": "npm run build && electron-builder --win --publish never",
+    "package:linux": "npm run build && electron-builder --linux --publish never",
+    "test:desktop": "node --test desktop/*.test.cjs",
+    "test:app": "npm run build && node desktop/smoke.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@playwright/test": "1.63.0",
+    "astro": "7.4.0",
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3",
     "typescript": "^5.9.3"
+  },
+  "main": "desktop/main.cjs",
+  "author": "Lyceum Agents",
+  "build": {
+    "appId": "com.lyceumagents.wholebrain",
+    "productName": "Whole Brain Simulation",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/main.cjs",
+      "desktop/paths.cjs",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Education"
+    },
+    "artifactName": "Whole-Brain-Simulation-${version}-${os}-${arch}.${ext}"
   }
 }
